@@ -12,6 +12,7 @@ const LOCATION_URL = (lat, lon) =>
   `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&accept-language=en`;
 
 const $hourly = () => document.getElementById("hourly");
+const $status = () => document.getElementById("hourly-status");
 const fetchJson = (url) =>
   fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))));
 
@@ -28,6 +29,14 @@ const formatDateLabel = (dateStr, todayStr) => {
     weekday: "long",
     day: "numeric",
     month: "long",
+  });
+};
+
+const formatDayAxisLabel = (dateStr, todayStr) => {
+  if (dateStr === todayStr) return "Today";
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
   });
 };
 
@@ -189,20 +198,27 @@ const clipPlot = (ctx, pad, plotW, plotH, fn) => {
   ctx.restore();
 };
 
+const chartSize = (canvas, fallbackH = CHART_H) => {
+  const box = canvas.parentElement.getBoundingClientRect();
+  return {
+    width: Math.max(1, Math.floor(box.width)),
+    height: Math.max(1, Math.floor(box.height) || fallbackH),
+  };
+};
+
 const drawChart = (canvas, day, opts) => {
-  const { colors, tempMin, tempMax, precipMax } = opts;
+  const { colors, tempMin, tempMax, precipMax, weekDays, todayStr } = opts;
+  const fallbackH = opts.chartH ?? CHART_H;
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  const width = Math.max(240, Math.floor(canvas.parentElement.getBoundingClientRect().width));
+  const { width, height: chartH } = chartSize(canvas, fallbackH);
   canvas.width = width * dpr;
-  canvas.height = CHART_H * dpr;
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${CHART_H}px`;
+  canvas.height = chartH * dpr;
 
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const plotW = width - PAD.l - PAD.r;
-  const plotH = CHART_H - PAD.t - PAD.b;
+  const plotH = chartH - PAD.t - PAD.b;
   const temps = smooth(day.temps, 2);
   const n = day.times.length;
   if (!n) return;
@@ -214,7 +230,7 @@ const drawChart = (canvas, day, opts) => {
   const yTemp = (v) => PAD.t + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
   const barW = Math.max(2, plotW / n - 1);
 
-  ctx.clearRect(0, 0, width, CHART_H);
+  ctx.clearRect(0, 0, width, chartH);
 
   clipPlot(ctx, PAD, plotW, plotH, () => {
     ctx.filter = "blur(10px)";
@@ -249,10 +265,31 @@ const drawChart = (canvas, day, opts) => {
     ctx.fillText(`${t}°`, 2, y + 4);
   }
 
-  const hourStep = n > 12 ? 3 : 2;
-  for (let i = 0; i < n; i += hourStep) {
-    ctx.fillStyle = colors.text;
-    ctx.fillText(formatHourLabel(day.times[i]), xAt(day.times[i]) - 10, CHART_H - 6);
+  if (weekDays) {
+    for (let d = 1; d < weekDays.length; d++) {
+      const x = xAt(day.times[weekDays[d].index]);
+      ctx.beginPath();
+      ctx.moveTo(x, PAD.t);
+      ctx.lineTo(x, PAD.t + plotH);
+      ctx.stroke();
+    }
+    ctx.textAlign = "center";
+    for (const { date, index } of weekDays) {
+      if (index >= n) continue;
+      const label = formatDayAxisLabel(date, todayStr);
+      const x = xAt(day.times[index]);
+      const labelW = ctx.measureText(label).width;
+      const cx = Math.min(Math.max(x, PAD.l + labelW / 2), PAD.l + plotW - labelW / 2);
+      ctx.fillStyle = colors.text;
+      ctx.fillText(label, cx, chartH - 6);
+    }
+    ctx.textAlign = "start";
+  } else {
+    const hourStep = n > 12 ? 3 : 2;
+    for (let i = 0; i < n; i += hourStep) {
+      ctx.fillStyle = colors.text;
+      ctx.fillText(formatHourLabel(day.times[i]), xAt(day.times[i]) - 10, chartH - 6);
+    }
   }
 
   for (let i = 0; i < n; i++) {
@@ -284,7 +321,7 @@ const drawChart = (canvas, day, opts) => {
   strokeTemp(true);
   strokeTemp(false);
 
-  if (opts.isToday) {
+  if (opts.isToday || opts.showNow) {
     const now = Date.now() / 1000;
     if (now >= xMin && now <= xMax) {
       const x = xAt(now);
@@ -299,12 +336,12 @@ const drawChart = (canvas, day, opts) => {
     }
   }
 
-  canvas._meta = { day, temps, xAt, yTemp, pad: PAD, plotW };
+  canvas._meta = { day, temps, xAt, yTemp, pad: PAD, plotW, weekDays, todayStr };
 };
 
 const bindTooltip = (canvas, tooltip) => {
   const show = (clientX) => {
-    const { day, temps, xAt, yTemp, pad, plotW } = canvas._meta || {};
+    const { day, temps, xAt, yTemp, pad, plotW, weekDays } = canvas._meta || {};
     if (!day) return;
     const x = clientX - canvas.getBoundingClientRect().left;
     if (x < pad.l || x > pad.l + plotW) {
@@ -322,7 +359,11 @@ const bindTooltip = (canvas, tooltip) => {
     }
     const uv = day.uv[best];
     const y = yTemp(temps[best]);
-    tooltip.textContent = `${formatTemp(temps[best])}${uv == null ? "" : ` · UV ${Math.round(uv)}`}`;
+    const temp = formatTemp(temps[best]);
+    const uvPart = uv == null ? "" : ` · UV ${Math.round(uv)}`;
+    tooltip.textContent = weekDays
+      ? `${new Date(day.times[best] * 1000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${formatHourLabel(day.times[best])} · ${temp}${uvPart}`
+      : `${temp}${uvPart}`;
     tooltip.style.left = `${xAt(day.times[best])}px`;
     tooltip.style.top = `${y}px`;
     tooltip.style.transform = y < 24 ? "translate(-50%, 12px)" : "translate(-50%, -120%)";
@@ -372,12 +413,27 @@ const groupHourly = (weatherData, todayStr, endStr) => {
   };
 };
 
-const createDayChart = (date, todayStr, day, scales) => {
+const mergeWeek = (grouped, dates) => {
+  const week = { times: [], temps: [], precip: [], uv: [], isDay: [] };
+  const weekDays = [];
+  for (const date of dates) {
+    weekDays.push({ date, index: week.times.length });
+    const d = grouped[date];
+    week.times.push(...d.times);
+    week.temps.push(...d.temps);
+    week.precip.push(...d.precip);
+    week.uv.push(...d.uv);
+    week.isDay.push(...d.isDay);
+  }
+  return { week, weekDays };
+};
+
+const createChartCard = (title, day, scales, chartOpts = {}) => {
   const card = document.createElement("div");
-  card.className = "day-card";
-  card.innerHTML = `<h4>${formatDateLabel(date, todayStr)}</h4>`;
+  card.className = chartOpts.weekDays ? "day-card day-card--week" : "day-card";
+  if (title) card.innerHTML = `<h4>${title}</h4>`;
   const wrap = document.createElement("div");
-  wrap.className = "day-chart";
+  wrap.className = chartOpts.weekDays ? "day-chart day-chart--week" : "day-chart";
   const canvas = document.createElement("canvas");
   const tooltip = document.createElement("div");
   tooltip.className = "chart-tooltip";
@@ -386,10 +442,19 @@ const createDayChart = (date, todayStr, day, scales) => {
   legend.className = "legend";
   legend.innerHTML = LEGEND;
   card.append(wrap, legend);
-  const opts = { colors: getColors(), ...scales, isToday: date === todayStr };
-  drawChart(canvas, day, opts);
+  const opts = { colors: getColors(), ...scales, ...chartOpts };
   bindTooltip(canvas, tooltip);
-  return { card, canvas, day, opts };
+  return { card, canvas, wrap, day, opts };
+};
+
+const showWeatherError = (message) => {
+  const root = $hourly();
+  root.querySelectorAll("#location-name, #current-feels, #week-chart, #chart-grid, .heading").forEach(
+    (el) => el.remove(),
+  );
+  const status = $status();
+  if (status) status.textContent = message;
+  else root.innerHTML = `<p>${message}</p>`;
 };
 
 const renderHourly = (weatherData, locationName) => {
@@ -404,26 +469,55 @@ const renderHourly = (weatherData, locationName) => {
     toLocalDateString(end),
   );
 
-  const root = $hourly();
   if (!dates.length) {
-    root.innerHTML = "<p>No hourly data available.</p>";
+    showWeatherError("No hourly data available.");
     return;
   }
 
-  root.innerHTML = [
-    locationName ? `<h2 class="heading">${locationName}</h2>` : "",
-    curFeels == null
-      ? ""
-      : `<div class="current-feels"><div class="current-feels__value">${formatTemp(curFeels)}</div><div class="current-feels__label">Feels like now</div></div>`,
-    '<h3 class="heading">Hourly</h3><div id="chart-grid"></div>',
-  ].join("");
+  const locationEl = document.getElementById("location-name");
+  if (locationName && locationEl) {
+    locationEl.textContent = locationName;
+    locationEl.hidden = false;
+  }
+
+  const feelsEl = document.getElementById("current-feels");
+  const feelsValue = document.getElementById("feels-value");
+  if (curFeels != null && feelsEl && feelsValue) {
+    feelsValue.textContent = formatTemp(curFeels);
+    feelsEl.hidden = false;
+  }
+
+  const status = $status();
+  if (status) status.remove();
+
+  const charts = [];
+  const { week, weekDays } = mergeWeek(grouped, dates);
+  const weekWrap = document.getElementById("week-chart");
+  weekWrap.innerHTML = "";
+  const weekChart = createChartCard(null, week, scales, {
+    weekDays,
+    todayStr,
+    showNow: true,
+    chartH: 220,
+  });
+  weekWrap.append(weekChart.card);
+  charts.push(weekChart);
 
   const grid = document.getElementById("chart-grid");
-  const charts = dates.map((date) => {
-    const chart = createDayChart(date, todayStr, grouped[date], scales);
+  grid.classList.remove("chart-grid-skeleton");
+  grid.replaceChildren();
+  const scrollToToday = () => {
+    const todayCard = grid.querySelector(".day-card:not(.day-card--week)");
+    if (todayCard) todayCard.scrollIntoView({ inline: "start", block: "nearest" });
+  };
+  for (const date of dates) {
+    const chart = createChartCard(formatDateLabel(date, todayStr), grouped[date], scales, {
+      isToday: date === todayStr,
+      todayStr,
+    });
     grid.append(chart.card);
-    return chart;
-  });
+    charts.push(chart);
+  }
 
   const redraw = () => {
     const colors = getColors();
@@ -433,16 +527,24 @@ const renderHourly = (weatherData, locationName) => {
     }
   };
 
-  let resizeTimer;
-  new ResizeObserver(() => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(redraw, 100);
-  }).observe(grid);
+  requestAnimationFrame(() => {
+    redraw();
+    scrollToToday();
+  });
+
+  let resizeRaf;
+  const scheduleRedraw = () => {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(redraw);
+  };
+
+  const resizeObserver = new ResizeObserver(scheduleRedraw);
+  for (const c of charts) resizeObserver.observe(c.wrap);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
 };
 
 if (!navigator.geolocation) {
-  $hourly().innerHTML = "<p>Geolocation not supported</p>";
+  showWeatherError("Geolocation not supported");
 } else {
   navigator.geolocation.getCurrentPosition(
     async ({ coords: { latitude: lat, longitude: lon } }) => {
@@ -457,11 +559,11 @@ if (!navigator.geolocation) {
           location.status === "fulfilled" ? formatLocation(location.value) : undefined,
         );
       } catch {
-        $hourly().innerHTML = "<p>Unable to fetch weather</p>";
+        showWeatherError("Unable to fetch weather");
       }
     },
     () => {
-      $hourly().innerHTML = "<p>Location access denied</p>";
+      showWeatherError("Location access denied");
     },
   );
 }

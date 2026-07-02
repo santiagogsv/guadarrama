@@ -9,7 +9,22 @@
 
 {% block body %}
 <main class="page page--wide">
-  <div id="hourly">Loading...</div>
+  <div id="hourly">
+    <h2 class="heading" id="location-name" hidden></h2>
+    <div class="current-feels" id="current-feels" hidden>
+      <div class="current-feels__value" id="feels-value">--°</div>
+      <div class="current-feels__label">Feels like now</div>
+    </div>
+    <h3 class="heading">Week</h3>
+    <div id="week-chart">
+      <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
+        <div class="day-chart day-chart--week"></div>
+      </div>
+    </div>
+    <h3 class="heading">Day view</h3>
+    <div id="chart-grid" class="chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
+    <div class="hourly-status" id="hourly-status" role="status">Loading weather…</div>
+  </div>
 </main>
 <script src="{{ get_url(path='weather.js') | safe }}"></script>
 {% endblock body %}
