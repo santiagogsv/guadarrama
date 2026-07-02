@@ -593,12 +593,11 @@ a {
   align-items: center;
   gap: var(--gap-sm);
   padding-block: var(--gap-sm);
-  border-block-end: 1px solid var(--border);
   cursor: pointer;
 }
 
-.train:last-child {
-  border-block-end: none;
+.train .route-badge-wrap {
+  flex-shrink: 0;
 }
 
 .time-dest {
@@ -607,11 +606,33 @@ a {
   min-width: 0;
 }
 
+.time-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
 .time-text {
   font-family: var(--font-mono);
   font-size: 0.9375rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.train .stops-left {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--muted);
 }
 
 .destination {
