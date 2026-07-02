@@ -3,12 +3,15 @@
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no" />
   <title>{% block title %}{% if page %}{{ page.title }}{% elif section %}{{ section.title }}{% endif %} · {{ config.title }}{% endblock title %}</title>
   {% block description %}
   <meta name="description" content="{{ config.description }}" />{% endblock description %}
   <link rel="stylesheet" href="{{ get_url(path='site.css') | safe }}" />
   {% block head %}{% endblock head %}
+  <script>
+    document.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
+  </script>
 </head>
 
 <body>

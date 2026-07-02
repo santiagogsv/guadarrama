@@ -78,7 +78,7 @@ function formatCountdown(arrivalTime, now = Date.now() / 1e3) {
   const secs = Math.max(0, Math.round((arrivalTime - now) / 5) * 5);
   const m = Math.floor(secs / 60);
   const s = secs % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}s`;
 }
 
 const CLOCK_OPTS = { hour: "2-digit", minute: "2-digit", second: "2-digit" };
@@ -2647,6 +2647,19 @@ function paintStationAlerts(stationDiv, station, alerts) {
     });
 }
 
+function paintRouteBadges(badgesDiv, station) {
+  if (!badgesDiv) return;
+  const activeRoutes = new Set(
+    getStationArrivals(cachedArrivalsByStopId, station).map((a) => a.route),
+  );
+  const activeFilter = activeFilters[stationKey(station)] || null;
+  badgesDiv.querySelectorAll(".route-badge").forEach((badge) => {
+    const route = badge.dataset.route;
+    badge.classList.toggle("route-badge--empty", !activeRoutes.has(route));
+    badge.classList.toggle("filter-inactive", !!activeFilter && route !== activeFilter);
+  });
+}
+
 function bindRouteFilters(badgesDiv, station, directionsDiv) {
   const key = stationKey(station);
   badgesDiv.querySelectorAll(".route-badge").forEach((badge) => {
@@ -2654,26 +2667,17 @@ function bindRouteFilters(badgesDiv, station, directionsDiv) {
       e.stopPropagation();
       const clickedRoute = badge.dataset.route;
       const activeFilter = activeFilters[key] || null;
-      const allBadges = badgesDiv.querySelectorAll(".route-badge");
       if (activeFilter === clickedRoute) {
         activeFilters[key] = null;
-        allBadges.forEach((b) => b.classList.remove("filter-inactive"));
         paintDirections(directionsDiv, station, null);
       } else {
         activeFilters[key] = clickedRoute;
-        allBadges.forEach((b) => {
-          b.classList.toggle("filter-inactive", b.dataset.route !== clickedRoute);
-        });
         paintDirections(directionsDiv, station, clickedRoute);
       }
+      paintRouteBadges(badgesDiv, station);
     };
   });
-  const activeFilter = activeFilters[key];
-  if (activeFilter) {
-    badgesDiv.querySelectorAll(".route-badge").forEach((b) => {
-      b.classList.toggle("filter-inactive", b.dataset.route !== activeFilter);
-    });
-  }
+  paintRouteBadges(badgesDiv, station);
 }
 
 function fillStationCard(cardEl, station, alerts) {
@@ -2806,6 +2810,7 @@ function updateMtaView(stations, arrivalsByStopId, failCount, feedCount, alerts)
     const card = cards[i];
     if (!card) return;
     const directionsDiv = card.querySelector(".directions");
+    const badgesDiv = card.querySelector(".station-badges");
     if (directionsDiv) {
       paintDirections(
         directionsDiv,
@@ -2813,6 +2818,7 @@ function updateMtaView(stations, arrivalsByStopId, failCount, feedCount, alerts)
         activeFilters[stationKey(station)] || null,
       );
     }
+    paintRouteBadges(badgesDiv, station);
     paintStationAlerts(card, station, alerts);
   });
   updateFeedWarning(root, failCount, feedCount);

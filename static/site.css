@@ -57,6 +57,7 @@ html.toc-open {
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  touch-action: manipulation;
 }
 
 body {
@@ -67,6 +68,9 @@ body {
   overflow-x: clip;
   background: var(--bg);
   color: var(--text);
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 img,
@@ -230,8 +234,6 @@ a {
   max-width: 100%;
   min-width: 0;
   color: var(--text);
-  touch-action: manipulation;
-  user-select: none;
 }
 
 #hourly :is(h2, h3, h4) {
@@ -350,6 +352,9 @@ a {
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted) 40%, transparent) transparent;
+  touch-action: pan-x;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .carousel:focus-visible {
@@ -553,6 +558,11 @@ a {
   transition: opacity 0.15s;
 }
 
+.station-badges .route-badge.route-badge--empty:not(.filter-inactive) {
+  opacity: 0.42;
+  cursor: default;
+}
+
 .station-badges .route-badge.filter-inactive {
   opacity: 0.35;
 }
@@ -600,6 +610,7 @@ a {
 .time-text {
   font-family: var(--font-mono);
   font-size: 0.9375rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
@@ -681,6 +692,7 @@ a {
 .modal-subtitle {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
