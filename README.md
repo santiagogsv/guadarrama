@@ -14,6 +14,7 @@ A minimal personal site built with [Zola](https://www.getzola.org/).
 ## Quick start
 
 ```bash
+bun scripts/build-stops.mjs
 zola serve    # http://127.0.0.1:1111
 zola build    # output → public/
 ```
@@ -38,8 +39,10 @@ guadarrama/
 
 ## Deploy
 
+For Cloudflare Pages, use this build command:
+
 ```bash
-zola build
+./scripts/build.sh
 ```
 
 Serve `public/` with any static host. Set `base_url` in `config.toml` first.

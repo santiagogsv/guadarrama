@@ -9,6 +9,7 @@ Nav: **Home · Weather · MTA · Markdown**
 ## Commands
 
 ```bash
+bun scripts/build-stops.mjs
 zola serve   # dev, port 1111
 zola build   # → public/
 ```

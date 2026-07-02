@@ -1,10 +1,11 @@
+#!/usr/bin/env bun
 /**
  * Build static/stops.json from MTA GTFS static data.
- * Run: node scripts/build-stops.mjs
+ * Run: bun scripts/build-stops.mjs
  */
 
 import { execSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,6 +152,14 @@ try {
   const stations = buildStations(tmp);
   writeFileSync(OUT, JSON.stringify(stations));
   console.log(`Wrote ${stations.length} stations → ${OUT} (${readFileSync(OUT).length} bytes)`);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (existsSync(OUT)) {
+    console.warn(`Failed to refresh stops catalog: ${message}`);
+    console.warn(`Keeping existing ${OUT}`);
+  } else {
+    throw error;
+  }
 } finally {
   execSync(`rm -rf "${tmp}"`);
 }
