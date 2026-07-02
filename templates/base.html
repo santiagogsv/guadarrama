@@ -17,8 +17,6 @@
     <nav class="nav" aria-label="Site">
       <a href="{{ get_url(path='/') | safe }}" {% if current_path=="/" or current_path is starting_with("/weather") %}
         aria-current="page" {% endif %}>Weather</a>
-      <a href="{{ get_url(path='mta/') | safe }}" {% if current_path is starting_with("/mta") %} aria-current="page" {%
-        endif %}>MTA</a>
       <a href="{{ get_url(path='markdown/') | safe }}" {% if current_path is starting_with("/markdown") %}
         aria-current="page" {% endif %}>Markdown</a>
     </nav>

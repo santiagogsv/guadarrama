@@ -2,9 +2,6 @@ const PRECIP_LIGHT = 2.5;
 const PRECIP_MODERATE = 7.6;
 const CHART_H = 190;
 const PAD = { t: 8, r: 8, b: 24, l: 32 };
-const LEGEND =
-  '<span class="legend-item"><span class="legend-dot legend-temp"></span>Feels like</span><span class="legend-item"><span class="legend-dot legend-precip"></span>Precip</span><span class="legend-item"><span class="legend-dot legend-uv"></span>UV</span>';
-
 const WEATHER_URL = (lat, lon) =>
   `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=apparent_temperature,precipitation,uv_index,is_day&timezone=auto&past_days=1&forecast_days=8`;
 
@@ -33,11 +30,10 @@ const formatDateLabel = (dateStr, todayStr) => {
 };
 
 const formatDayAxisLabel = (dateStr, todayStr) => {
-  if (dateStr === todayStr) return "Today";
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-  });
+  if (dateStr === todayStr) return "Now";
+  return new Date(`${dateStr}T00:00:00`)
+    .toLocaleDateString(undefined, { weekday: "short" })
+    .slice(0, 3);
 };
 
 const formatHourLabel = (ts) => {
@@ -274,14 +270,17 @@ const drawChart = (canvas, day, opts) => {
       ctx.stroke();
     }
     ctx.textAlign = "center";
-    for (const { date, index } of weekDays) {
+    for (let d = 0; d < weekDays.length; d++) {
+      const { date, index } = weekDays[d];
       if (index >= n) continue;
+      const xStart = d === 0 ? PAD.l : xAt(day.times[index]);
+      const xEnd =
+        d < weekDays.length - 1
+          ? xAt(day.times[weekDays[d + 1].index])
+          : PAD.l + plotW;
       const label = formatDayAxisLabel(date, todayStr);
-      const x = xAt(day.times[index]);
-      const labelW = ctx.measureText(label).width;
-      const cx = Math.min(Math.max(x, PAD.l + labelW / 2), PAD.l + plotW - labelW / 2);
       ctx.fillStyle = colors.text;
-      ctx.fillText(label, cx, chartH - 6);
+      ctx.fillText(label, (xStart + xEnd) / 2, chartH - 6);
     }
     ctx.textAlign = "start";
   } else {
@@ -438,10 +437,7 @@ const createChartCard = (title, day, scales, chartOpts = {}) => {
   const tooltip = document.createElement("div");
   tooltip.className = "chart-tooltip";
   wrap.append(canvas, tooltip);
-  const legend = document.createElement("div");
-  legend.className = "legend";
-  legend.innerHTML = LEGEND;
-  card.append(wrap, legend);
+  card.append(wrap);
   const opts = { colors: getColors(), ...scales, ...chartOpts };
   bindTooltip(canvas, tooltip);
   return { card, canvas, wrap, day, opts };
@@ -449,9 +445,7 @@ const createChartCard = (title, day, scales, chartOpts = {}) => {
 
 const showWeatherError = (message) => {
   const root = $hourly();
-  root.querySelectorAll("#location-name, #current-feels, #week-chart, #chart-grid, .heading").forEach(
-    (el) => el.remove(),
-  );
+  root.querySelectorAll("#weather-now, .chart-block").forEach((el) => el.remove());
   const status = $status();
   if (status) status.textContent = message;
   else root.innerHTML = `<p>${message}</p>`;
@@ -474,17 +468,16 @@ const renderHourly = (weatherData, locationName) => {
     return;
   }
 
-  const locationEl = document.getElementById("location-name");
-  if (locationName && locationEl) {
-    locationEl.textContent = locationName;
-    locationEl.hidden = false;
-  }
-
-  const feelsEl = document.getElementById("current-feels");
+  const nowEl = document.getElementById("weather-now");
   const feelsValue = document.getElementById("feels-value");
-  if (curFeels != null && feelsEl && feelsValue) {
+  const locationEl = document.getElementById("location-name");
+  if (curFeels != null && nowEl && feelsValue) {
     feelsValue.textContent = formatTemp(curFeels);
-    feelsEl.hidden = false;
+    if (locationName && locationEl) {
+      locationEl.textContent = ` · ${locationName}`;
+      locationEl.hidden = false;
+    }
+    nowEl.hidden = false;
   }
 
   const status = $status();

@@ -2458,9 +2458,13 @@ function renderStations(stations, arrivals, failCount, feeds, alerts) {
   timeDiv.className = "refresh-meta";
   timeDiv.textContent = timeStr;
   container.appendChild(timeDiv);
+  const carousel = document.createElement("div");
+  carousel.className = "carousel carousel--station";
+  carousel.setAttribute("tabindex", "0");
+  carousel.setAttribute("aria-label", "Nearby subway stations");
   const stationDivs = stations.map((s) => {
     const stationDiv = document.createElement("div");
-    stationDiv.className = "station";
+    stationDiv.className = "station-card";
     const headerDiv = document.createElement("div");
     headerDiv.className = "station-header";
     const infoDiv = document.createElement("div");
@@ -2616,8 +2620,9 @@ function renderStations(stations, arrivals, failCount, feeds, alerts) {
     return stationDiv;
   });
   stationDivs.forEach((div) => {
-    container.appendChild(div);
+    carousel.appendChild(div);
   });
+  container.appendChild(carousel);
   if (failCount > 0) {
     const warningDiv = document.createElement("div");
     warningDiv.className = "warning";
@@ -2640,8 +2645,13 @@ function showStopsModal(train) {
   document.body.appendChild(overlay);
 }
 
+function mtaRoot() {
+  return document.getElementById("mta-content");
+}
+
 async function load() {
-  const el = document.getElementById("content");
+  const el = mtaRoot();
+  if (!el) return;
   el.innerHTML = '<div class="loading">Loading...</div>';
   try {
     let stations = cachedStations,
@@ -2711,7 +2721,8 @@ function stopRefreshInterval() {
 
 async function refreshTrainTimes() {
   if (lastRefreshPromise) return;
-  const el = document.getElementById("content");
+  const el = mtaRoot();
+  if (!el) return;
   try {
     if (!cachedStations) {
       return;
@@ -2749,6 +2760,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
+  if (!mtaRoot()) return;
   load();
   startRefreshInterval();
 });

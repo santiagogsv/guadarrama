@@ -1,30 +1,44 @@
 {% extends "base.html" %}
 
 {% block title %}Weather · {{ config.title }}{% endblock title %}
-{% block description %}<meta name="description" content="Hourly feels-like weather and conditions near you." />{% endblock description %}
+{% block description %}<meta name="description" content="Hourly weather and nearby NYC subway arrivals." />{% endblock description %}
 
 {% block head %}
 <link rel="icon" href="{{ get_url(path='weather.png') | safe }}" />
+<link rel="preconnect" href="https://api-endpoint.mta.info" />
+<script defer src="{{ get_url(path='trains.js') | safe }}"></script>
 {% endblock head %}
 
 {% block body %}
 <main class="page page--wide">
   <div id="hourly">
-    <h2 class="heading" id="location-name" hidden></h2>
-    <div class="current-feels" id="current-feels" hidden>
-      <div class="current-feels__value" id="feels-value">--°</div>
-      <div class="current-feels__label">Feels like now</div>
+    <div class="weather-now" id="weather-now" hidden>
+      <span class="weather-now__temp" id="feels-value">--°</span>
+      <span class="weather-now__meta">feels like<span id="location-name" hidden></span></span>
     </div>
-    <h3 class="heading">Week</h3>
-    <div id="week-chart">
-      <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
-        <div class="day-chart day-chart--week"></div>
+    <section class="chart-block">
+      <h3 class="heading chart-block__title">Week</h3>
+      <div id="week-chart">
+        <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
+          <div class="day-chart day-chart--week"></div>
+        </div>
       </div>
-    </div>
-    <h3 class="heading">Day view</h3>
-    <div id="chart-grid" class="chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
+    </section>
+    <section class="chart-block">
+      <h3 class="heading chart-block__title">Day view</h3>
+      <div id="chart-grid" class="carousel carousel--chart chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
+    </section>
     <div class="hourly-status" id="hourly-status" role="status">Loading weather…</div>
   </div>
+
+  <section class="mta-section" id="mta" aria-labelledby="mta-heading">
+    <h3 class="heading" id="mta-heading">Subway</h3>
+    <div class="toolbar">
+      <button class="btn btn--grow" onclick="refreshTrainTimes()" type="button">Refresh trains</button>
+      <button class="btn btn--icon btn--ghost" onclick="refreshLocation()" type="button" aria-label="Update location">◎</button>
+    </div>
+    <div id="mta-content"></div>
+  </section>
 </main>
 <script src="{{ get_url(path='weather.js') | safe }}"></script>
 {% endblock body %}

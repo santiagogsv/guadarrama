@@ -1,5 +1,5 @@
 title = "Guadarrama"
-description = "Weather, MTA subway arrivals, and markdown."
+description = "Weather, subway arrivals, and markdown."
 base_url = "https://guadarrama.us/"
 compile_sass = false
 build_search_index = false

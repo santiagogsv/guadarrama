@@ -1,4 +1,4 @@
 +++
 title = "MTA"
-template = "mta.html"
+redirect_to = "/"
 +++
