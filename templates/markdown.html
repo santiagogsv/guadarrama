@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Markdown · {{ config.title }}{% endblock title %}
+{% block description %}<meta name="description" content="Minimal markdown viewer with table of contents." />{% endblock description %}
+
+{% block head %}
+<link rel="icon" type="image/png" href="{{ get_url(path='md.png') | safe }}" />
+<script>
+  document.documentElement.classList.toggle("toc-open", matchMedia("(width > 900px)").matches);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/katex.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/contrib/auto-render.min.js"></script>
+{% endblock head %}
+
+{% block body %}
+<main class="page page--reader">
+  <div class="toolbar toolbar--sticky">
+    <button class="btn btn--ghost" id="toc-toggle" type="button" aria-controls="toc" aria-expanded="true">Contents</button>
+    <span class="toolbar__grow"></span>
+    <button class="btn btn--icon btn--ghost" id="file-open" type="button" aria-label="Open file">+</button>
+  </div>
+  <div id="toc-scrim" aria-hidden="true"></div>
+  <div class="reader">
+    <aside id="toc" aria-label="Contents">
+      <nav id="toc-list"><p class="empty">No headings yet</p></nav>
+    </aside>
+    <div id="content" data-empty="true">
+      <p id="file-meta" class="meta">No file loaded</p>
+      <article id="output"></article>
+    </div>
+  </div>
+  <input id="file-input" type="file" accept=".md,.markdown,text/markdown" hidden />
+</main>
+<script>window.MD_INTRO_URL = "{{ get_url(path='intro.md') | safe }}";</script>
+<script src="{{ get_url(path='markdown.js') | safe }}"></script>
+{% endblock body %}

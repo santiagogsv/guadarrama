@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Weather · {{ config.title }}{% endblock title %}
+{% block description %}<meta name="description" content="Hourly feels-like weather and conditions near you." />{% endblock description %}
+
+{% block head %}
+<link rel="icon" href="{{ get_url(path='weather.png') | safe }}" />
+{% endblock head %}
+
+{% block body %}
+<main class="page page--wide">
+  <div id="hourly">Loading...</div>
+</main>
+<script src="{{ get_url(path='weather.js') | safe }}"></script>
+{% endblock body %}

@@ -1,0 +1,9 @@
+title = "Guadarrama"
+description = "Weather, MTA subway arrivals, and markdown."
+base_url = "https://guadarrama.us/"
+compile_sass = false
+build_search_index = false
+minify_html = true
+
+[markdown]
+smart_punctuation = false
