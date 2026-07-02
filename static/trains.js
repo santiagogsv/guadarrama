@@ -30,8 +30,92 @@ const ROUTE_COLORS = {
 // Routes that need dark text for better contrast (yellow/light backgrounds)
 const DARK_TEXT_ROUTES = new Set(["N", "Q", "R", "W"]);
 
+const FEED_SLUGS = ["", "-ace", "-bdfm", "-nqrw", "-l", "-g", "-jz", "-si"];
+
+// MTA splits GTFS-RT by line group — see api.mta.info feed list
+const ROUTE_FEED = {
+  1: "",
+  2: "",
+  3: "",
+  4: "",
+  5: "",
+  6: "",
+  "6X": "",
+  7: "",
+  "7X": "",
+  S: "",
+  SIR: "-si",
+  A: "-ace",
+  C: "-ace",
+  E: "-ace",
+  H: "-ace",
+  B: "-bdfm",
+  D: "-bdfm",
+  F: "-bdfm",
+  FX: "-bdfm",
+  M: "-bdfm",
+  N: "-nqrw",
+  Q: "-nqrw",
+  R: "-nqrw",
+  W: "-nqrw",
+  L: "-l",
+  G: "-g",
+  J: "-jz",
+  Z: "-jz",
+};
+
+const REFRESH_MS = 3e4;
+
 function getBaseRoute(routeId) {
   return routeId?.endsWith("X") ? routeId.slice(0, -1) : routeId;
+}
+
+function stationKey(station) {
+  return station.ids.join("/");
+}
+
+function formatCountdown(arrivalTime, now = Date.now() / 1e3) {
+  const secs = Math.max(0, Math.round((arrivalTime - now) / 5) * 5);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+const CLOCK_OPTS = { hour: "2-digit", minute: "2-digit", second: "2-digit" };
+
+function feedsForStations(stations) {
+  if (!stations?.length) return [...FEED_SLUGS];
+  const slugs = new Set();
+  for (const s of stations) {
+    for (const r of s.routes) {
+      const slug = ROUTE_FEED[r] ?? ROUTE_FEED[getBaseRoute(r)];
+      if (slug !== undefined) slugs.add(slug);
+    }
+  }
+  return slugs.size ? [...slugs] : [...FEED_SLUGS];
+}
+
+function watchStopIds(stations) {
+  const ids = new Set();
+  for (const s of stations) {
+    for (const id of s.ids) {
+      ids.add(id);
+      ids.add(`${id}N`);
+      ids.add(`${id}S`);
+    }
+  }
+  return ids;
+}
+
+function getStationArrivals(arrivalsByStopId, station) {
+  const out = [];
+  for (const id of station.ids) {
+    for (const suffix of ["N", "S", ""]) {
+      const list = arrivalsByStopId.get(suffix ? `${id}${suffix}` : id);
+      if (list) out.push(...list);
+    }
+  }
+  return out;
 }
 
 let cachedStations = null,
@@ -39,8 +123,12 @@ let cachedStations = null,
   stopIdMap = null,
   lastRefreshPromise = null,
   refreshInterval = null,
+  countdownInterval = null,
   cachedAlerts = [],
-  activeFilters = {};
+  cachedArrivalsByStopId = null,
+  activeFilters = {},
+  mtaInView = true,
+  mtaObserver = null;
 
 // Minimal protobuf decoder - only decodes fields we need from GTFS-realtime
 const PBF = {
@@ -2308,15 +2396,11 @@ function haversine(lat1, lon1, lat2, lon2) {
   return Math.sqrt(x * x + y * y) * R;
 }
 
-async function loadLocationsAndStations() {
+async function loadLocationsAndStations({ forceRefresh = false } = {}) {
   try {
-    const pos = await new Promise((res, rej) =>
-        navigator.geolocation.getCurrentPosition(res, rej, {
-          timeout: 10000,
-        }),
-      ),
-      userLat = pos.coords.latitude,
-      userLon = pos.coords.longitude,
+    const { lat: userLat, lon: userLon } = await getSharedPosition({
+        forceRefresh,
+      }),
       stops = STOPS_DATA.map((s) => ({
         name: s.n,
         lat: s.la,
@@ -2347,18 +2431,20 @@ async function loadLocationsAndStations() {
   }
 }
 
-async function fetchTrainTimes(_stations) {
+function entityTouchesStops(entity, watchIds) {
+  const stus = entity.tripUpdate?.stopTimeUpdate;
+  if (!stus) return false;
+  for (const stu of stus) {
+    if (stu.stopId && watchIds.has(stu.stopId)) return true;
+  }
+  return false;
+}
+
+async function fetchTrainTimes(stations) {
   try {
-    const feeds = [
-      "",
-      "-ace",
-      "-bdfm",
-      "-nqrw",
-      "-l",
-      "-g",
-      "-jz",
-      "-si",
-    ];
+    const feeds = feedsForStations(stations);
+    const watchIds = watchStopIds(stations);
+    const filterStops = watchIds.size > 0;
     let failCount = 0;
     const results = await Promise.allSettled(
       feeds.map(async (slug) => {
@@ -2379,257 +2465,357 @@ async function fetchTrainTimes(_stations) {
         console.warn("Feed failed:", result.reason);
       }
     });
-    // Clear old trip stops and rebuild
     tripStopsMap.clear();
-    // First pass: collect all stops for each trip
-    allEntities.forEach((e) => {
+    const relevant = filterStops
+      ? allEntities.filter((e) => entityTouchesStops(e, watchIds))
+      : allEntities;
+    relevant.forEach((e) => {
       if (e.tripUpdate?.trip?.tripId && e.tripUpdate?.stopTimeUpdate) {
-        const tripId = e.tripUpdate.trip.tripId;
-        const stops = e.tripUpdate.stopTimeUpdate
-          .map((stu) => stu.stopId)
-          .filter(Boolean);
-        tripStopsMap.set(tripId, stops);
+        tripStopsMap.set(
+          e.tripUpdate.trip.tripId,
+          e.tripUpdate.stopTimeUpdate
+            .map((stu) => stu.stopId)
+            .filter(Boolean),
+        );
       }
     });
-    const now = Date.now() / 1e3,
-      arrivals = [];
-    allEntities.forEach((e) => {
-      e.tripUpdate?.stopTimeUpdate?.forEach((stu) => {
+    const now = Date.now() / 1e3;
+    const arrivalsByStopId = new Map();
+    const pushArrival = (stopId, arrival) => {
+      let list = arrivalsByStopId.get(stopId);
+      if (!list) {
+        list = [];
+        arrivalsByStopId.set(stopId, list);
+      }
+      list.push(arrival);
+    };
+    relevant.forEach((e) => {
+      const tripId = e.tripUpdate.trip.tripId || null;
+      const routeId = e.tripUpdate.trip.routeId;
+      const tripStops = tripStopsMap.get(tripId);
+      const lastStopId =
+        tripStops?.length > 0 ? tripStops[tripStops.length - 1] : null;
+      const destStation = lastStopId ? getStop(lastStopId) : null;
+      const destination = destStation ? destStation.name : null;
+      const stuByStop = new Map();
+      for (const stu of e.tripUpdate.stopTimeUpdate) {
+        if (stu.stopId) stuByStop.set(stu.stopId, stu);
+      }
+      e.tripUpdate.stopTimeUpdate.forEach((stu) => {
         const arrivalTime = stu.arrival?.time || stu.departure?.time;
-        if (arrivalTime > now && stu.stopId) {
-          const station = getStop(stu.stopId);
-          const tripId = e.tripUpdate.trip.tripId || null;
-          const routeId = e.tripUpdate.trip.routeId;
-          const tripStops = tripStopsMap.get(tripId);
-          const lastStopId =
-            tripStops && tripStops.length > 0
-              ? tripStops[tripStops.length - 1]
-              : null;
-          const destStation = lastStopId ? getStop(lastStopId) : null;
-          const destination = destStation ? destStation.name : null;
-          const stopIdx = tripStops ? tripStops.indexOf(stu.stopId) : -1;
-          const upcomingStops =
-            stopIdx >= 0 && tripStops
-              ? tripStops
-                  .slice(stopIdx + 1)
-                  .map((s) => {
-                    const futureStu = e.tripUpdate.stopTimeUpdate.find(
-                      (stu) => stu.stopId === s,
-                    );
-                    const time = futureStu
-                      ? futureStu.arrival?.time ||
-                        futureStu.departure?.time
-                      : null;
-                    return {
-                      name: getStop(s)?.name,
-                      time: time ? new Date(1e3 * time) : null,
-                    };
-                  })
-                  .filter((obj) => obj.name)
-              : [];
-          station &&
-            arrivals.push({
-              route: routeId,
-              minutes: Math.round((arrivalTime - now) / 60),
-              time: new Date(1e3 * arrivalTime),
-              stationName: station.name,
-              stopId: stu.stopId,
-              direction: stu.stopId.slice(-1),
-              tripId: tripId,
-              destination: destination,
-              upcomingStops: upcomingStops,
-            });
-        }
+        if (!arrivalTime || arrivalTime <= now || !stu.stopId) return;
+        if (filterStops && !watchIds.has(stu.stopId)) return;
+        const station = getStop(stu.stopId);
+        if (!station) return;
+        const stopIdx = tripStops ? tripStops.indexOf(stu.stopId) : -1;
+        const upcomingStops =
+          stopIdx >= 0 && tripStops
+            ? tripStops
+                .slice(stopIdx + 1)
+                .map((s) => {
+                  const futureStu = stuByStop.get(s);
+                  const time = futureStu
+                    ? futureStu.arrival?.time || futureStu.departure?.time
+                    : null;
+                  return {
+                    name: getStop(s)?.name,
+                    time: time ? new Date(1e3 * time) : null,
+                  };
+                })
+                .filter((obj) => obj.name)
+            : [];
+        pushArrival(stu.stopId, {
+          route: routeId,
+          minutes: Math.round((arrivalTime - now) / 60),
+          arrivalTime,
+          time: new Date(1e3 * arrivalTime),
+          stationName: station.name,
+          stopId: stu.stopId,
+          direction: stu.stopId.slice(-1),
+          tripId,
+          destination,
+          upcomingStops,
+        });
       });
     });
-    return { arrivals, failCount, feeds };
+    return { arrivalsByStopId, failCount, feedCount: feeds.length };
   } catch (e) {
     console.error("Error fetching train times:", e);
     throw e;
   }
 }
 
-function renderStations(stations, arrivals, failCount, feeds, alerts) {
-  const timeStr = lastRefreshTime
-      ? `Last refresh: ${lastRefreshTime.toLocaleTimeString()} · Auto-refresh every 30s`
-      : "Auto-refresh every 30s",
-    container = document.createDocumentFragment(),
-    timeDiv = document.createElement("div");
-  timeDiv.className = "refresh-meta";
-  timeDiv.textContent = timeStr;
-  container.appendChild(timeDiv);
-  const carousel = document.createElement("div");
-  carousel.className = "carousel carousel--station";
-  carousel.setAttribute("tabindex", "0");
-  carousel.setAttribute("aria-label", "Nearby subway stations");
-  const stationDivs = stations.map((s) => {
-    const stationDiv = document.createElement("div");
-    stationDiv.className = "station-card";
-    const headerDiv = document.createElement("div");
-    headerDiv.className = "station-header";
-    const infoDiv = document.createElement("div");
-    infoDiv.className = "station-info";
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "station-name";
-    nameSpan.textContent = s.name;
-    infoDiv.appendChild(nameSpan);
-    const distSpan = document.createElement("span");
-    distSpan.className = "distance";
-    distSpan.textContent = `${Math.round(1e3 * s.dist)}m`;
-    infoDiv.appendChild(distSpan);
-    headerDiv.appendChild(infoDiv);
-    const badgesDiv = document.createElement("div");
+function refreshMetaText() {
+  return lastRefreshTime
+    ? `Last refresh: ${lastRefreshTime.toLocaleTimeString()} · Auto-refresh every 30s when visible`
+    : "Auto-refresh every 30s when visible";
+}
+
+function splitByDirection(stationArrivals, filterRoute) {
+  const filtered = filterRoute
+    ? stationArrivals.filter((a) => a.route === filterRoute)
+    : stationArrivals;
+  return {
+    northbound: filtered
+      .filter((a) => a.direction === "N")
+      .sort((a, b) => a.time - b.time)
+      .slice(0, 6),
+    southbound: filtered
+      .filter((a) => a.direction === "S")
+      .sort((a, b) => a.time - b.time)
+      .slice(0, 6),
+  };
+}
+
+function createTrainRow(t) {
+  const trainDiv = document.createElement("div");
+  trainDiv.className = "train";
+  trainDiv.dataset.route = t.route;
+  if (t.arrivalTime) trainDiv.dataset.arrival = String(t.arrivalTime);
+  const baseRoute = getBaseRoute(t.route);
+  const badge = document.createElement("span");
+  badge.className = "route-badge";
+  badge.style.background =
+    ROUTE_COLORS[t.route] || ROUTE_COLORS[baseRoute] || "#666";
+  if (DARK_TEXT_ROUTES.has(t.route) || DARK_TEXT_ROUTES.has(baseRoute)) {
+    badge.style.color = "#000";
+  }
+  badge.textContent = t.route;
+  trainDiv.appendChild(badge);
+  const timeDest = document.createElement("div");
+  timeDest.className = "time-dest";
+  const timeSpan = document.createElement("span");
+  timeSpan.className = "time-text";
+  timeSpan.textContent = formatCountdown(t.arrivalTime);
+  timeDest.appendChild(timeSpan);
+  if (t.destination) {
+    const destSpan = document.createElement("span");
+    destSpan.className = "destination";
+    destSpan.textContent = t.destination;
+    timeDest.appendChild(destSpan);
+  }
+  trainDiv.appendChild(timeDest);
+  if (t.upcomingStops?.length > 0) {
+    trainDiv.onclick = (e) => {
+      e.stopPropagation();
+      showStopsModal(t);
+    };
+  }
+  return trainDiv;
+}
+
+function createDirectionCol(title, trains) {
+  const col = document.createElement("div");
+  col.className = "direction-col";
+  const h4 = document.createElement("h4");
+  h4.textContent = title;
+  col.appendChild(h4);
+  if (trains.length > 0) {
+    trains.forEach((t) => col.appendChild(createTrainRow(t)));
+  } else {
+    const noTrainsDiv = document.createElement("div");
+    noTrainsDiv.className = "train";
+    noTrainsDiv.textContent = "No upcoming trains";
+    col.appendChild(noTrainsDiv);
+  }
+  return col;
+}
+
+function paintDirections(directionsDiv, station, filterRoute) {
+  const { northbound, southbound } = splitByDirection(
+    getStationArrivals(cachedArrivalsByStopId, station),
+    filterRoute,
+  );
+  directionsDiv.replaceChildren(
+    createDirectionCol("Uptown", northbound),
+    createDirectionCol("Downtown", southbound),
+  );
+}
+
+function paintStationAlerts(stationDiv, station, alerts) {
+  stationDiv
+    .querySelectorAll(".station-alert")
+    .forEach((el) => el.remove());
+  (alerts || [])
+    .filter((a) => a.routes.some((r) => station.routes.includes(r)))
+    .slice(0, 2)
+    .forEach((alert) => {
+      const alertDiv = document.createElement("div");
+      alertDiv.className = "station-alert";
+      alertDiv.textContent = `⚠ ${(alert.header || alert.description).slice(0, 120)}`;
+      stationDiv.appendChild(alertDiv);
+    });
+}
+
+function bindRouteFilters(badgesDiv, station, directionsDiv) {
+  const key = stationKey(station);
+  badgesDiv.querySelectorAll(".route-badge").forEach((badge) => {
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      const clickedRoute = badge.dataset.route;
+      const activeFilter = activeFilters[key] || null;
+      const allBadges = badgesDiv.querySelectorAll(".route-badge");
+      if (activeFilter === clickedRoute) {
+        activeFilters[key] = null;
+        allBadges.forEach((b) => b.classList.remove("filter-inactive"));
+        paintDirections(directionsDiv, station, null);
+      } else {
+        activeFilters[key] = clickedRoute;
+        allBadges.forEach((b) => {
+          b.classList.toggle("filter-inactive", b.dataset.route !== clickedRoute);
+        });
+        paintDirections(directionsDiv, station, clickedRoute);
+      }
+    };
+  });
+  const activeFilter = activeFilters[key];
+  if (activeFilter) {
+    badgesDiv.querySelectorAll(".route-badge").forEach((b) => {
+      b.classList.toggle("filter-inactive", b.dataset.route !== activeFilter);
+    });
+  }
+}
+
+function fillStationCard(cardEl, station, alerts) {
+  cardEl.classList.remove("station-card--skeleton");
+  cardEl.removeAttribute("aria-hidden");
+  cardEl.dataset.station = station.name;
+  cardEl.dataset.stationKey = stationKey(station);
+  cardEl.hidden = false;
+
+  const nameSpan = cardEl.querySelector(".station-name");
+  const distSpan = cardEl.querySelector(".distance");
+  if (nameSpan) {
+    nameSpan.textContent = station.name;
+    nameSpan.classList.remove("skeleton-bar");
+  }
+  if (distSpan) {
+    distSpan.textContent = `${Math.round(1e3 * station.dist)}m`;
+    distSpan.classList.remove("skeleton-bar", "skeleton-bar--short");
+  }
+
+  const headerDiv = cardEl.querySelector(".station-header");
+  let badgesDiv = cardEl.querySelector(".station-badges");
+  if (!badgesDiv && headerDiv) {
+    badgesDiv = document.createElement("div");
     badgesDiv.className = "station-badges";
-    let activeFilter = activeFilters[s.name] || null;
-    const stationStopIds = new Set(
-      s.ids.flatMap((id) => [id, `${id}N`, `${id}S`]),
-    );
-    const stationArrivals = arrivals.filter(
-      (a) => a.stopId && stationStopIds.has(a.stopId),
-    );
-    const directionsDiv = document.createElement("div");
-    directionsDiv.className = "directions";
-    s.routes.forEach((r) => {
+    headerDiv.appendChild(badgesDiv);
+  }
+  if (badgesDiv) {
+    badgesDiv.classList.remove("skeleton-badges");
+    badgesDiv.removeAttribute("aria-hidden");
+    badgesDiv.replaceChildren();
+    station.routes.forEach((r) => {
       const badge = document.createElement("span");
       badge.className = "route-badge";
       badge.style.background = ROUTE_COLORS[r] || "#666";
       if (DARK_TEXT_ROUTES.has(r)) badge.style.color = "#000";
       badge.textContent = r;
       badge.dataset.route = r;
-      badge.onclick = (e) => {
-        e.stopPropagation();
-        const clickedRoute = badge.dataset.route;
-        const allBadges = badgesDiv.querySelectorAll(".route-badge");
-        if (activeFilter === clickedRoute) {
-          activeFilter = null;
-          activeFilters[s.name] = null;
-          allBadges.forEach((b) => {
-            b.classList.remove("filter-inactive");
-          });
-          renderTrains(null);
-        } else {
-          activeFilter = clickedRoute;
-          activeFilters[s.name] = clickedRoute;
-          allBadges.forEach((b) => {
-            b.classList.toggle(
-              "filter-inactive",
-              b.dataset.route !== clickedRoute,
-            );
-          });
-          renderTrains(clickedRoute);
-        }
-      };
       badgesDiv.appendChild(badge);
     });
-    if (activeFilter) {
-      const allBadges = badgesDiv.querySelectorAll(".route-badge");
-      allBadges.forEach((b) => {
-        b.classList.toggle(
-          "filter-inactive",
-          b.dataset.route !== activeFilter,
-        );
-      });
+  }
+
+  let directionsDiv = cardEl.querySelector(".directions");
+  if (!directionsDiv) {
+    directionsDiv = document.createElement("div");
+    directionsDiv.className = "directions";
+    cardEl.appendChild(directionsDiv);
+  }
+  bindRouteFilters(badgesDiv, station, directionsDiv);
+  paintDirections(directionsDiv, station, activeFilters[stationKey(station)] || null);
+  paintStationAlerts(cardEl, station, alerts);
+  return cardEl;
+}
+
+function buildStationCard(station, alerts) {
+  const stationDiv = document.createElement("div");
+  stationDiv.className = "station-card";
+  stationDiv.innerHTML =
+    '<div class="station-header"><div class="station-info"><span class="station-name"></span><span class="distance"></span></div></div>';
+  return fillStationCard(stationDiv, station, alerts);
+}
+
+function populateMtaView(stations, arrivalsByStopId, failCount, feedCount, alerts) {
+  cachedArrivalsByStopId = arrivalsByStopId;
+  const root = mtaRoot();
+  if (!root) return;
+  const meta = root.querySelector(".refresh-meta");
+  if (meta) meta.textContent = refreshMetaText();
+  const cards = root.querySelectorAll("[data-mta-carousel] .station-card");
+  stations.forEach((station, i) => {
+    if (cards[i]) fillStationCard(cards[i], station, alerts);
+  });
+  cards.forEach((card, i) => {
+    card.hidden = i >= stations.length;
+  });
+  updateFeedWarning(root, failCount, feedCount);
+}
+
+function hasMtaCarousel() {
+  return !!mtaRoot()?.querySelector("[data-mta-carousel]");
+}
+
+function updateFeedWarning(root, failCount, feedCount) {
+  let warningDiv = root.querySelector(".warning");
+  if (failCount > 0) {
+    const text = `Note: ${failCount} of ${feedCount} feeds failed to load. Some trains may not be shown.`;
+    if (warningDiv) {
+      warningDiv.textContent = text;
+    } else {
+      warningDiv = document.createElement("div");
+      warningDiv.className = "warning";
+      warningDiv.textContent = text;
+      root.appendChild(warningDiv);
     }
-    headerDiv.appendChild(badgesDiv);
-    stationDiv.appendChild(headerDiv);
-    const createDirectionCol = (title, trains) => {
-      const col = document.createElement("div");
-      col.className = "direction-col";
-      const h4 = document.createElement("h4");
-      h4.textContent = title;
-      col.appendChild(h4);
-      if (trains.length > 0) {
-        const trainElements = trains.map((t) => {
-          const trainDiv = document.createElement("div"),
-            badge = document.createElement("span");
-          trainDiv.className = "train";
-          trainDiv.dataset.route = t.route;
-          const baseRoute = getBaseRoute(t.route);
-          badge.className = "route-badge";
-          badge.style.background =
-            ROUTE_COLORS[t.route] || ROUTE_COLORS[baseRoute] || "#666";
-          if (
-            DARK_TEXT_ROUTES.has(t.route) ||
-            DARK_TEXT_ROUTES.has(baseRoute)
-          ) {
-            badge.style.color = "#000";
-          }
-          badge.textContent = t.route;
-          trainDiv.appendChild(badge);
-          const timeDest = document.createElement("div");
-          timeDest.className = "time-dest";
-          const timeSpan = document.createElement("span");
-          timeSpan.className = "time-text";
-          timeSpan.textContent = `${t.minutes} min`;
-          timeDest.appendChild(timeSpan);
-          if (t.destination) {
-            const destSpan = document.createElement("span");
-            destSpan.className = "destination";
-            destSpan.textContent = t.destination;
-            timeDest.appendChild(destSpan);
-          }
-          trainDiv.appendChild(timeDest);
-          if (t.upcomingStops && t.upcomingStops.length > 0) {
-            trainDiv.onclick = (e) => {
-              e.stopPropagation();
-              showStopsModal(t);
-            };
-          }
-          return trainDiv;
-        });
-        trainElements.forEach((el) => {
-          col.appendChild(el);
-        });
-      } else {
-        const noTrainsDiv = document.createElement("div");
-        noTrainsDiv.className = "train";
-        noTrainsDiv.textContent = "No upcoming trains";
-        col.appendChild(noTrainsDiv);
-      }
-      return col;
-    };
-    const renderTrains = (filterRoute) => {
-      const filtered = filterRoute
-        ? stationArrivals.filter((a) => a.route === filterRoute)
-        : stationArrivals;
-      const northbound = filtered
-        .filter((a) => "N" === a.direction)
-        .sort((a, b) => a.time - b.time)
-        .slice(0, 6);
-      const southbound = filtered
-        .filter((a) => "S" === a.direction)
-        .sort((a, b) => a.time - b.time)
-        .slice(0, 6);
-      directionsDiv.innerHTML = "";
-      directionsDiv.appendChild(createDirectionCol("Uptown", northbound));
-      directionsDiv.appendChild(
-        createDirectionCol("Downtown", southbound),
-      );
-    };
-    renderTrains(activeFilter);
-    stationDiv.appendChild(directionsDiv);
-    const stationAlerts = (alerts || []).filter((a) =>
-      a.routes.some((r) => s.routes.includes(r)),
-    );
-    stationAlerts.slice(0, 2).forEach((alert) => {
-      const alertDiv = document.createElement("div");
-      alertDiv.className = "station-alert";
-      alertDiv.textContent = `⚠ ${(alert.header || alert.description).slice(0, 120)}`;
-      stationDiv.appendChild(alertDiv);
-    });
-    return stationDiv;
-  });
-  stationDivs.forEach((div) => {
-    carousel.appendChild(div);
-  });
+  } else if (warningDiv) {
+    warningDiv.remove();
+  }
+}
+
+function mountMtaView(stations, arrivalsByStopId, failCount, feedCount, alerts) {
+  cachedArrivalsByStopId = arrivalsByStopId;
+  const container = document.createDocumentFragment();
+  const timeDiv = document.createElement("div");
+  timeDiv.className = "refresh-meta";
+  timeDiv.textContent = refreshMetaText();
+  container.appendChild(timeDiv);
+  const carousel = document.createElement("div");
+  carousel.className = "carousel carousel--station";
+  carousel.setAttribute("tabindex", "0");
+  carousel.setAttribute("aria-label", "Nearby subway stations");
+  stations.forEach((s) => carousel.appendChild(buildStationCard(s, alerts)));
   container.appendChild(carousel);
   if (failCount > 0) {
     const warningDiv = document.createElement("div");
     warningDiv.className = "warning";
-    warningDiv.textContent = `Note: ${failCount} of ${feeds} feeds failed to load. Some trains may not be shown.`;
+    warningDiv.textContent = `Note: ${failCount} of ${feedCount} feeds failed to load. Some trains may not be shown.`;
     container.appendChild(warningDiv);
   }
   return container;
+}
+
+function updateMtaView(stations, arrivalsByStopId, failCount, feedCount, alerts) {
+  cachedArrivalsByStopId = arrivalsByStopId;
+  const root = mtaRoot();
+  if (!root) return;
+  const meta = root.querySelector(".refresh-meta");
+  if (meta) meta.textContent = refreshMetaText();
+  const cards = root.querySelectorAll("[data-mta-carousel] .station-card");
+  stations.forEach((station, i) => {
+    const card = cards[i];
+    if (!card) return;
+    const directionsDiv = card.querySelector(".directions");
+    if (directionsDiv) {
+      paintDirections(
+        directionsDiv,
+        station,
+        activeFilters[stationKey(station)] || null,
+      );
+    }
+    paintStationAlerts(card, station, alerts);
+  });
+  updateFeedWarning(root, failCount, feedCount);
 }
 
 function showStopsModal(train) {
@@ -2639,7 +2825,7 @@ function showStopsModal(train) {
   const content = document.createElement("div");
   content.className = "modal-content";
   content.style.position = "relative";
-  content.innerHTML = `<button class="modal-close" aria-label="Close">&times;</button><div class="modal-header"><span class="route-badge" style="background:${ROUTE_COLORS[train.route] || ROUTE_COLORS[baseRoute] || "#666"};${DARK_TEXT_ROUTES.has(train.route) || DARK_TEXT_ROUTES.has(baseRoute) ? "color:#000;" : ""}">${train.route}</span><div><div class="modal-title">${train.destination || "Unknown"}</div><div class="modal-subtitle">${train.minutes} min</div></div></div><div class="modal-stops">${train.upcomingStops.map((stop, i, arr) => `<div class="modal-stop${i === arr.length - 1 ? " terminal" : ""}"><span class="modal-arrow">${i === arr.length - 1 ? "●" : "↓"}</span><span class="modal-stop-text">${stop.name}</span>${stop.time ? `<span class="arrival-time">${stop.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>` : ""}</div>`).join("")}</div>`;
+  content.innerHTML = `<button class="modal-close" aria-label="Close">&times;</button><div class="modal-header"><span class="route-badge" style="background:${ROUTE_COLORS[train.route] || ROUTE_COLORS[baseRoute] || "#666"};${DARK_TEXT_ROUTES.has(train.route) || DARK_TEXT_ROUTES.has(baseRoute) ? "color:#000;" : ""}">${train.route}</span><div><div class="modal-title">${train.destination || "Unknown"}</div><div class="modal-subtitle">${formatCountdown(train.arrivalTime)}</div></div></div><div class="modal-stops">${train.upcomingStops.map((stop, i, arr) => `<div class="modal-stop${i === arr.length - 1 ? " terminal" : ""}"><span class="modal-arrow">${i === arr.length - 1 ? "●" : "↓"}</span><span class="modal-stop-text">${stop.name}</span>${stop.time ? `<span class="arrival-time">${stop.time.toLocaleTimeString([], CLOCK_OPTS)}</span>` : ""}</div>`).join("")}</div>`;
   overlay.appendChild(content);
   overlay.onclick = () => overlay.remove();
   document.body.appendChild(overlay);
@@ -2649,67 +2835,103 @@ function mtaRoot() {
   return document.getElementById("mta-content");
 }
 
-async function load() {
+async function resolveStations(forceRefresh = false) {
+  if (cachedStations && !forceRefresh) return cachedStations;
+  try {
+    return await loadLocationsAndStations({ forceRefresh });
+  } catch (e) {
+    if (e.message === "Location permission denied") throw e;
+    console.warn("Geolocation failed", e);
+    return STOPS_DATA.slice(0, 6).map((s, idx) => ({
+      name: s.n,
+      lat: s.la,
+      lon: s.lo,
+      ids: s.ids,
+      routes: s.r,
+      dist: idx,
+    }));
+  }
+}
+
+function setMtaLoadingMessage(message) {
+  const meta = mtaRoot()?.querySelector(".refresh-meta");
+  if (meta) meta.textContent = message;
+}
+
+async function load(forceRefresh = false) {
   const el = mtaRoot();
   if (!el) return;
-  el.innerHTML = '<div class="loading">Loading...</div>';
+  setMtaLoadingMessage("Loading nearby stations…");
   try {
-    let stations = cachedStations,
-      trainData,
-      alerts;
-    if (!stations) {
-      const trainFetchPromise = fetchTrainTimes([]),
-        alertsPromise = fetchServiceAlerts(),
-        geolocationPromise = loadLocationsAndStations().catch((e) => {
-          if (e.message === "Location permission denied") {
-            throw e;
-          }
-          console.warn("Geolocation failed", e);
-          return STOPS_DATA.slice(0, 6).map((s, idx) => ({
-            name: s.n,
-            lat: s.la,
-            lon: s.lo,
-            ids: s.ids,
-            routes: s.r,
-            dist: idx,
-          }));
-        });
-      [stations, trainData, alerts] = await Promise.all([
-        geolocationPromise,
-        trainFetchPromise,
-        alertsPromise,
-      ]);
-      initStopIdMap(stations);
-      cachedStations = stations;
+    const stations = await resolveStations(forceRefresh);
+    initStopIdMap(stations);
+    cachedStations = stations;
+    const [trainData, alerts] = await Promise.all([
+      fetchTrainTimes(stations),
+      fetchServiceAlerts(),
+    ]);
+    lastRefreshTime = new Date();
+    if (hasMtaCarousel()) {
+      populateMtaView(
+        stations,
+        trainData.arrivalsByStopId,
+        trainData.failCount,
+        trainData.feedCount,
+        alerts,
+      );
     } else {
-      [trainData, alerts] = await Promise.all([
-        fetchTrainTimes(stations),
-        fetchServiceAlerts(),
-      ]);
+      el.replaceChildren(
+        mountMtaView(
+          stations,
+          trainData.arrivalsByStopId,
+          trainData.failCount,
+          trainData.feedCount,
+          alerts,
+        ),
+      );
     }
-    const fragment = renderStations(
-      stations,
-      trainData.arrivals,
-      trainData.failCount,
-      trainData.feeds.length,
-      alerts,
-    );
-    el.innerHTML = "";
-    el.appendChild(fragment);
   } catch (e) {
     console.error("Full error:", e);
     if (e.message === "Location permission denied") {
       el.innerHTML =
         '<div><strong>Location Access Required</strong><br>To show nearby train stations, this app needs permission to access your location.<br><br><strong>On iPhone/iPad (Safari):</strong><br>1. Open the Settings app<br>2. Scroll down and tap Safari<br>3. Tap Location<br>4. Choose "Allow" or ensure it\'s not "Deny"<br>5. Return to this app and refresh the page<br><br><strong>On Android (Chrome):</strong><br>1. Tap the lock icon or "i" in the address bar<br>2. Tap Site settings > Location<br>3. Choose "Allow"<br>4. Refresh the page</div>';
     } else {
-      el.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+      setMtaLoadingMessage(`Error: ${e.message}`);
     }
   }
 }
 
+function shouldPollMta() {
+  return !document.hidden && mtaInView;
+}
+
+function tickCountdowns() {
+  const root = mtaRoot();
+  if (!root) return;
+  const now = Date.now() / 1e3;
+  root.querySelectorAll(".train[data-arrival]").forEach((row) => {
+    const arrival = Number(row.dataset.arrival);
+    if (!arrival) return;
+    const timeEl = row.querySelector(".time-text");
+    if (timeEl) {
+      timeEl.textContent = formatCountdown(arrival, now);
+    }
+  });
+}
+
+function syncRefreshInterval() {
+  if (shouldPollMta()) {
+    startRefreshInterval();
+    startCountdownTick();
+  } else {
+    stopRefreshInterval();
+    stopCountdownTick();
+  }
+}
+
 function startRefreshInterval() {
-  if (refreshInterval) clearInterval(refreshInterval);
-  refreshInterval = setInterval(refreshTrainTimes, 3e4);
+  if (refreshInterval) return;
+  refreshInterval = setInterval(refreshTrainTimes, REFRESH_MS);
 }
 
 function stopRefreshInterval() {
@@ -2719,29 +2941,61 @@ function stopRefreshInterval() {
   }
 }
 
+function startCountdownTick() {
+  if (countdownInterval) return;
+  countdownInterval = setInterval(tickCountdowns, 5e3);
+}
+
+function stopCountdownTick() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+}
+
+function initMtaObserver() {
+  const section = document.getElementById("mta");
+  if (!section || mtaObserver) return;
+  mtaObserver = new IntersectionObserver(
+    ([entry]) => {
+      mtaInView = entry.isIntersecting;
+      syncRefreshInterval();
+    },
+    { threshold: 0.05 },
+  );
+  mtaObserver.observe(section);
+}
+
 async function refreshTrainTimes() {
-  if (lastRefreshPromise) return;
+  if (lastRefreshPromise || !shouldPollMta()) return;
   const el = mtaRoot();
-  if (!el) return;
+  if (!el || !cachedStations) return;
   try {
-    if (!cachedStations) {
-      return;
-    }
     lastRefreshPromise = Promise.all([
       fetchTrainTimes(cachedStations),
       fetchServiceAlerts(),
     ]);
     const [trainData, alerts] = await lastRefreshPromise;
     lastRefreshTime = new Date();
-    const fragment = renderStations(
-      cachedStations,
-      trainData.arrivals,
-      trainData.failCount,
-      trainData.feeds.length,
-      alerts,
-    );
-    el.innerHTML = "";
-    el.appendChild(fragment);
+    if (el.querySelector("[data-mta-carousel] .station-card[data-station-key]")) {
+      updateMtaView(
+        cachedStations,
+        trainData.arrivalsByStopId,
+        trainData.failCount,
+        trainData.feedCount,
+        alerts,
+      );
+    } else {
+      el.replaceChildren(
+        mountMtaView(
+          cachedStations,
+          trainData.arrivalsByStopId,
+          trainData.failCount,
+          trainData.feedCount,
+          alerts,
+        ),
+      );
+    }
   } catch (e) {
     console.error("Error refreshing train times:", e);
     el.innerHTML = `<div class="error">Error: ${e.message}</div>`;
@@ -2752,15 +3006,15 @@ async function refreshTrainTimes() {
 
 async function refreshLocation() {
   cachedStations = null;
-  await load();
+  cachedArrivalsByStopId = null;
+  await load(true);
 }
 
-document.addEventListener("visibilitychange", () => {
-  document.hidden ? stopRefreshInterval() : startRefreshInterval();
-});
+document.addEventListener("visibilitychange", syncRefreshInterval);
 
 window.addEventListener("DOMContentLoaded", () => {
   if (!mtaRoot()) return;
+  initMtaObserver();
   load();
-  startRefreshInterval();
+  syncRefreshInterval();
 });

@@ -5,27 +5,36 @@
 
 {% block head %}
 <link rel="icon" href="{{ get_url(path='weather.png') | safe }}" />
+<link rel="preconnect" href="https://api.open-meteo.com" />
 <link rel="preconnect" href="https://api-endpoint.mta.info" />
+<script src="{{ get_url(path='geo.js') | safe }}"></script>
 <script defer src="{{ get_url(path='trains.js') | safe }}"></script>
 {% endblock head %}
 
 {% block body %}
 <main class="page page--wide">
   <div id="hourly">
-    <div class="weather-now" id="weather-now" hidden>
+    <div class="weather-now" id="weather-now">
       <div class="weather-now__row">
         <span class="weather-now__temp" id="feels-value">--°</span>
-        <span class="weather-now__location" id="location-name" hidden></span>
+        <span class="weather-now__location" id="location-name">—</span>
       </div>
       <span class="weather-now__meta">feels like</span>
     </div>
     <div id="week-chart">
-      <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
+      <div class="day-card day-card--week day-card--skeleton" data-chart="week" aria-hidden="true">
         <h4>Full week</h4>
-        <div class="day-chart"></div>
+        <div class="day-chart"><div class="chart-placeholder" aria-hidden="true"></div></div>
       </div>
     </div>
-    <div id="chart-grid" class="carousel carousel--chart chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
+    <div id="chart-grid" class="carousel carousel--chart" tabindex="0" aria-label="Daily hour-by-hour forecasts">
+      {% for i in range(end=8) %}
+      <div class="day-card day-card--skeleton" data-day-slot="{{ i }}" aria-hidden="true">
+        <h4 class="day-card__title">&nbsp;</h4>
+        <div class="day-chart"><div class="chart-placeholder" aria-hidden="true"></div></div>
+      </div>
+      {% endfor %}
+    </div>
     <div class="hourly-status" id="hourly-status" role="status">Loading weather…</div>
   </div>
 
@@ -34,7 +43,52 @@
       <button class="btn btn--grow" onclick="refreshTrainTimes()" type="button">Refresh trains</button>
       <button class="btn btn--icon btn--ghost" onclick="refreshLocation()" type="button" aria-label="Update location">◎</button>
     </div>
-    <div id="mta-content"></div>
+    <div id="mta-content">
+      <div class="refresh-meta">Loading nearby stations…</div>
+      <div class="carousel carousel--station" data-mta-carousel tabindex="0" aria-label="Nearby subway stations">
+        {% for i in range(end=6) %}
+        <div class="station-card station-card--skeleton" data-station-slot="{{ i }}" aria-hidden="true">
+          <div class="station-header">
+            <div class="station-info">
+              <span class="station-name skeleton-bar"></span>
+              <span class="distance skeleton-bar skeleton-bar--short"></span>
+            </div>
+            <div class="station-badges skeleton-badges" aria-hidden="true">
+              {% for j in range(end=5) %}
+              <span class="route-badge skeleton-pill"></span>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="directions">
+            <div class="direction-col">
+              <h4>Uptown</h4>
+              {% for j in range(end=6) %}
+              <div class="train train--skeleton" aria-hidden="true">
+                <span class="route-badge skeleton-pill"></span>
+                <div class="time-dest">
+                  <span class="time-text skeleton-line">-- min</span>
+                  <span class="destination skeleton-line"></span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="direction-col">
+              <h4>Downtown</h4>
+              {% for j in range(end=6) %}
+              <div class="train train--skeleton" aria-hidden="true">
+                <span class="route-badge skeleton-pill"></span>
+                <div class="time-dest">
+                  <span class="time-text skeleton-line">-- min</span>
+                  <span class="destination skeleton-line"></span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
   </section>
 </main>
 <script src="{{ get_url(path='weather.js') | safe }}"></script>

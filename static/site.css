@@ -18,10 +18,11 @@
 
   --axis-text: var(--text);
   --grid-line: var(--border);
-  --precip-light: light-dark(oklch(78% 0.1 230 / 30%), oklch(78% 0.1 230 / 35%));
-  --precip-moderate: light-dark(oklch(72% 0.12 230 / 50%), oklch(72% 0.12 230 / 55%));
-  --precip-heavy: light-dark(oklch(58% 0.2 25 / 50%), oklch(62% 0.18 25 / 55%));
-  --precip-border: light-dark(oklch(68% 0.12 230 / 80%), oklch(72% 0.12 230 / 90%));
+  --precip-light: light-dark(oklch(72% 0.14 230 / 55%), oklch(76% 0.12 230 / 60%));
+  --precip-moderate: light-dark(oklch(68% 0.15 230 / 70%), oklch(72% 0.12 230 / 75%));
+  --precip-heavy: light-dark(oklch(58% 0.2 25 / 65%), oklch(62% 0.18 25 / 70%));
+  --precip-wash: light-dark(oklch(78% 0.1 230 / 22%), oklch(78% 0.1 230 / 26%));
+  --precip-border: light-dark(oklch(58% 0.14 230 / 85%), oklch(72% 0.12 230 / 90%));
   --now-line: var(--muted);
 
   --content: 38rem;
@@ -36,6 +37,7 @@
   --station-card: clamp(20rem, 88vw, 24rem);
   --chart-h: 160px;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Menlo", "Monaco", monospace;
 
   font-family: var(--font);
   line-height: 1.5;
@@ -248,17 +250,56 @@ a {
   min-width: 0;
 }
 
-.chart-skeleton {
-  pointer-events: none;
-}
-
-.chart-skeleton .day-chart {
+.chart-placeholder {
+  width: 100%;
+  height: 100%;
   background: color-mix(in oklch, var(--border) 55%, transparent);
   border-radius: calc(var(--radius) - 0.25rem);
 }
 
-.chart-grid-skeleton {
-  min-block-size: calc(var(--chart-h) + 1.25rem + 2 * var(--inset));
+.day-card--skeleton {
+  pointer-events: none;
+}
+
+.skeleton-bar,
+.skeleton-line {
+  display: inline-block;
+  background: color-mix(in oklch, var(--border) 55%, transparent);
+  border-radius: calc(var(--radius) - 0.25rem);
+  color: transparent;
+}
+
+.skeleton-bar {
+  width: 8rem;
+  height: 1.125rem;
+}
+
+.skeleton-bar--short {
+  width: 2.5rem;
+  height: 0.75rem;
+}
+
+.skeleton-pill {
+  background: color-mix(in oklch, var(--border) 55%, transparent) !important;
+  color: transparent !important;
+}
+
+.skeleton-line {
+  width: 100%;
+  height: 0.75rem;
+}
+
+.skeleton-line.destination {
+  width: 70%;
+  margin-block-start: 0.125rem;
+}
+
+.train--skeleton {
+  pointer-events: none;
+}
+
+.station-card--skeleton {
+  pointer-events: none;
 }
 
 .weather-now {
@@ -283,6 +324,7 @@ a {
 }
 
 .weather-now__location {
+  min-height: 1.25em;
   font-size: 0.9375rem;
   color: var(--muted);
 }
@@ -519,6 +561,7 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--inset);
+  min-block-size: 16.5rem;
 }
 
 .direction-col {
@@ -555,6 +598,7 @@ a {
 }
 
 .time-text {
+  font-family: var(--font-mono);
   font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
 }
@@ -635,7 +679,9 @@ a {
 }
 
 .modal-subtitle {
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
@@ -687,9 +733,10 @@ a {
 
 .arrival-time {
   margin-inline-start: auto;
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
-  color: var(--muted);
   font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 /* ── markdown reader ── */

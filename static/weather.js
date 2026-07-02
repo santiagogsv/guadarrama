@@ -1,17 +1,37 @@
 const PRECIP_LIGHT = 2.5;
 const PRECIP_MODERATE = 7.6;
+const PRECIP_BAR_MIN_PX = 6;
+const PRECIP_BAR_MAX_FRAC = 0.5;
 const CHART_H = 160;
 const CHART_PAD = { t: 4, r: 6, b: 18, l: 28 };
 const WEATHER_URL = (lat, lon) =>
   `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=apparent_temperature,precipitation,uv_index,is_day&timezone=auto&past_days=1&forecast_days=8`;
 
-const LOCATION_URL = (lat, lon) =>
-  `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&accept-language=en`;
+const WEATHER_CACHE_TTL_MS = 30 * 60 * 1000;
+
+const weatherCacheKey = (lat, lon) =>
+  `guadarrama:weather:${roundCoord(lat)}:${roundCoord(lon)}`;
 
 const $hourly = () => document.getElementById("hourly");
 const $status = () => document.getElementById("hourly-status");
 const fetchJson = (url) =>
   fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))));
+
+const fetchWeather = async (lat, lon) => {
+  const key = weatherCacheKey(lat, lon);
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts < WEATHER_CACHE_TTL_MS) return data;
+    }
+  } catch {}
+  const data = await fetchJson(WEATHER_URL(lat, lon));
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+  return data;
+};
 
 const toLocalDateString = (d) => {
   const y = d.getFullYear();
@@ -42,6 +62,37 @@ const formatHourLabel = (ts) => {
 };
 
 const formatTemp = (v) => (v == null || Number.isNaN(v) ? "--" : `${Math.round(v)}°`);
+
+const precipIntensity = (p) => {
+  if (p <= 0) return null;
+  if (p < 0.2) return "Trace";
+  if (p <= PRECIP_LIGHT) return "Light rain";
+  if (p <= PRECIP_MODERATE) return "Rain";
+  return "Heavy rain";
+};
+
+const formatPrecip = (p) => {
+  const label = precipIntensity(p);
+  if (!label) return "";
+  const mm = p < 0.1 ? "<0.1" : p < 10 ? p.toFixed(1) : String(Math.round(p));
+  return ` · ${label} (${mm} mm/h)`;
+};
+
+const precipBarHeight = (p, precipMax, plotH) => {
+  if (p <= 0) return 0;
+  const scaled = Math.sqrt(p / precipMax);
+  return Math.max(PRECIP_BAR_MIN_PX, scaled * plotH * PRECIP_BAR_MAX_FRAC);
+};
+
+const dayPrecipLabel = (day) => {
+  const rainy = day.precip.filter((p) => p > 0);
+  if (!rainy.length) return "";
+  const max = Math.max(...day.precip);
+  const total = day.precip.reduce((sum, p) => sum + p, 0);
+  if (max < 0.2 && total < 1) return " · Drizzle";
+  if (total >= 5 || max >= PRECIP_MODERATE) return " · Rain";
+  return " · Light rain";
+};
 
 const smooth = (values, r = 1) => {
   if (values.length < 3) return values.slice();
@@ -77,49 +128,10 @@ const nearestIndex = (times, targetMs = Date.now()) => {
   return best;
 };
 
-const isJunkPlace = (v) => /community board|county|united states/i.test(v || "");
-
-const pickPlace = (address, keys) => {
-  for (const key of keys) {
-    const v = address[key];
-    if (v && !isJunkPlace(v)) return v;
-  }
-  return null;
-};
-
-const formatLocation = (data) => {
-  if (!data) return null;
-  const a = data.address;
-  if (a) {
-    const parts = [
-      pickPlace(a, ["neighbourhood", "quarter", "commercial", "hamlet"]),
-      pickPlace(a, ["suburb", "borough", "city_district"]),
-      pickPlace(a, ["city", "town", "municipality"]),
-    ].filter((p, i, arr) => p && arr.indexOf(p) === i);
-    const line = parts.join(", ");
-    if (line) return a.postcode ? `${line} ${a.postcode}` : line;
-  }
-  if (!data.display_name) return null;
-  const zip = data.display_name.match(/\b(\d{5})(?:-\d{4})?\b/)?.[1];
-  const parts = data.display_name
-    .split(",")
-    .map((p) => p.trim())
-    .filter((p) => p && !isJunkPlace(p) && !/^\d{5}(?:-\d{4})?$/.test(p));
-  const borough = parts.findIndex((p) =>
-    /^(manhattan|brooklyn|queens|bronx|staten island)$/i.test(p),
-  );
-  if (borough >= 0) {
-    const line = [
-      borough > 0 ? parts[borough - 1] : null,
-      parts[borough],
-      parts.slice(borough + 1).find((p) => p !== parts[borough]),
-    ]
-      .filter(Boolean)
-      .join(", ");
-    return zip ? `${line} ${zip}` : line || null;
-  }
-  const line = parts.slice(0, 3).join(", ");
-  return zip ? `${line} ${zip}` : line || null;
+const formatWeatherLocation = (data) => {
+  const tz = data?.timezone;
+  if (!tz) return null;
+  return tz.split("/").pop()?.replace(/_/g, " ") || null;
 };
 
 let colorProbe;
@@ -149,6 +161,8 @@ const getColors = () => {
       [PRECIP_MODERATE, resolveCss("--precip-moderate", "background-color", "rgba(90,200,250,0.55)")],
       [Infinity, resolveCss("--precip-heavy", "background-color", "rgba(255,69,58,0.55)")],
     ],
+    precipWash: resolveCss("--precip-wash", "background-color", "rgba(90,200,250,0.18)"),
+    precipBorder: resolveCss("--precip-border", "background-color", "rgba(90,200,250,0.8)"),
     night: dark ? "rgba(0,0,0,0.62)" : "rgba(0,0,0,0.24)",
     cloudy: dark ? "rgba(88,98,118,0.42)" : "rgba(168,178,198,0.5)",
     overcast: dark ? "rgba(118,128,148,0.36)" : "rgba(198,206,218,0.42)",
@@ -323,6 +337,19 @@ const drawChart = (canvas, day, opts) => {
   ctx.clearRect(0, 0, width, chartH);
 
   clipPlot(ctx, CHART_PAD, plotW, plotH, () => {
+    for (let i = 0; i < n; i++) {
+      const p = day.precip[i];
+      if (p <= 0) continue;
+      const x0 = i === 0 ? CHART_PAD.l : (xAt(day.times[i - 1]) + xAt(day.times[i])) / 2;
+      const x1 =
+        i < n - 1 ? (xAt(day.times[i]) + xAt(day.times[i + 1])) / 2 : CHART_PAD.l + plotW;
+      const washAlpha = Math.min(0.42, 0.14 + Math.sqrt(p / precipMax) * 0.28);
+      ctx.globalAlpha = washAlpha;
+      ctx.fillStyle = colors.precipWash;
+      ctx.fillRect(x0, CHART_PAD.t, x1 - x0, plotH);
+    }
+    ctx.globalAlpha = 1;
+
     ctx.filter = "blur(10px)";
     for (let i = 0; i < n; i++) {
       const x0 = i === 0 ? CHART_PAD.l : (xAt(day.times[i - 1]) + xAt(day.times[i])) / 2;
@@ -388,9 +415,14 @@ const drawChart = (canvas, day, opts) => {
   for (let i = 0; i < n; i++) {
     const p = day.precip[i];
     if (p <= 0) continue;
-    const h = (p / precipMax) * plotH * 0.45;
+    const h = precipBarHeight(p, precipMax, plotH);
+    const x = xAt(day.times[i]) - barW / 2;
+    const y = CHART_PAD.t + plotH - h;
     ctx.fillStyle = bandColor(p, colors.precip);
-    ctx.fillRect(xAt(day.times[i]) - barW / 2, CHART_PAD.t + plotH - h, barW, h);
+    ctx.fillRect(x, y, barW, h);
+    ctx.strokeStyle = colors.precipBorder;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, barW - 1), Math.max(0, h - 1));
   }
 
   const tempPoints = tempChartPoints(day.times, temps, xAt, yTemp);
@@ -448,10 +480,12 @@ const bindTooltip = (canvas, tooltip) => {
     const uv = day.uv[best];
     const y = yTemp(temps[best]);
     const temp = formatTemp(temps[best]);
+    const precip = day.precip[best];
     const uvPart = uv == null ? "" : ` · UV ${Math.round(uv)}`;
+    const precipPart = formatPrecip(precip);
     tooltip.textContent = weekDays
-      ? `${new Date(day.times[best] * 1000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${formatHourLabel(day.times[best])} · ${temp}${uvPart}`
-      : `${temp}${uvPart}`;
+      ? `${new Date(day.times[best] * 1000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${formatHourLabel(day.times[best])} · ${temp}${precipPart}${uvPart}`
+      : `${temp}${precipPart}${uvPart}`;
     tooltip.style.left = `${xAt(day.times[best])}px`;
     tooltip.style.top = `${y}px`;
     tooltip.style.transform = y < 24 ? "translate(-50%, 12px)" : "translate(-50%, -120%)";
@@ -516,35 +550,31 @@ const mergeWeek = (grouped, dates) => {
   return { week, weekDays };
 };
 
-const createChartCard = (title, day, scales, chartOpts = {}) => {
-  const card = document.createElement("div");
-  card.className = chartOpts.weekDays ? "day-card day-card--week" : "day-card";
-  if (title) {
-    const heading = document.createElement("h4");
-    heading.textContent = title;
-    card.append(heading);
-  }
-  const wrap = document.createElement("div");
-  wrap.className = "day-chart";
+const mountChartInCard = (cardEl, title, day, scales, chartOpts = {}) => {
+  cardEl.classList.remove("day-card--skeleton");
+  cardEl.removeAttribute("aria-hidden");
+  const heading = cardEl.querySelector(".day-card__title, h4");
+  if (heading && title) heading.textContent = `${title}${dayPrecipLabel(day)}`;
+  const wrap = cardEl.querySelector(".day-chart");
+  wrap.replaceChildren();
   const canvas = document.createElement("canvas");
   const tooltip = document.createElement("div");
   tooltip.className = "chart-tooltip";
   wrap.append(canvas, tooltip);
-  card.append(wrap);
   const opts = { colors: getColors(), ...scales, ...chartOpts };
   bindTooltip(canvas, tooltip);
-  return { card, canvas, wrap, day, opts };
+  return { card: cardEl, canvas, wrap, day, opts };
 };
 
 const showWeatherError = (message) => {
-  const root = $hourly();
-  root.querySelectorAll("#weather-now, #week-chart, #chart-grid").forEach((el) => el.remove());
   const status = $status();
-  if (status) status.textContent = message;
-  else root.innerHTML = `<p>${message}</p>`;
+  if (status) {
+    status.hidden = false;
+    status.textContent = message;
+  }
 };
 
-const renderHourly = (weatherData, locationName) => {
+const renderHourly = (weatherData) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const end = new Date(today);
@@ -561,47 +591,54 @@ const renderHourly = (weatherData, locationName) => {
     return;
   }
 
-  const nowEl = document.getElementById("weather-now");
   const feelsValue = document.getElementById("feels-value");
   const locationEl = document.getElementById("location-name");
-  if (curFeels != null && nowEl && feelsValue) {
+  const locationName = formatWeatherLocation(weatherData);
+  if (curFeels != null && feelsValue) {
     feelsValue.textContent = formatTemp(curFeels);
-    if (locationName && locationEl) {
-      locationEl.textContent = locationName;
-      locationEl.hidden = false;
-    }
-    nowEl.hidden = false;
+  }
+  if (locationEl) {
+    locationEl.textContent = locationName || "—";
   }
 
   const status = $status();
-  if (status) status.remove();
+  if (status) status.hidden = true;
 
   const charts = [];
   const { week, weekDays } = mergeWeek(grouped, dates);
   const weekWrap = document.getElementById("week-chart");
-  weekWrap.innerHTML = "";
-  const weekChart = createChartCard("Full week", week, scales, {
-    weekDays,
-    todayStr,
-    showNow: true,
-  });
-  weekWrap.append(weekChart.card);
-  charts.push(weekChart);
+  const weekCard = weekWrap?.querySelector('[data-chart="week"]');
+  if (weekCard) {
+    charts.push(
+      mountChartInCard(weekCard, "Full week", week, scales, {
+        weekDays,
+        todayStr,
+        showNow: true,
+      }),
+    );
+  }
 
   const grid = document.getElementById("chart-grid");
-  grid.classList.remove("chart-grid-skeleton");
-  grid.replaceChildren();
+  const daySlots = grid ? [...grid.querySelectorAll("[data-day-slot]")] : [];
   const scrollToToday = () => {
-    const todayCard = grid.querySelector(".day-card:not(.day-card--week)");
+    const todayCard = grid?.querySelector(
+      '.day-card:not(.day-card--week):not([hidden]):not(.day-card--skeleton)',
+    );
     if (todayCard) todayCard.scrollIntoView({ inline: "start", block: "nearest" });
   };
-  for (const date of dates) {
-    const chart = createChartCard(formatDateLabel(date, todayStr), grouped[date], scales, {
-      isToday: date === todayStr,
-      todayStr,
-    });
-    grid.append(chart.card);
-    charts.push(chart);
+  dates.forEach((date, i) => {
+    const slot = daySlots[i];
+    if (!slot) return;
+    slot.hidden = false;
+    charts.push(
+      mountChartInCard(slot, formatDateLabel(date, todayStr), grouped[date], scales, {
+        isToday: date === todayStr,
+        todayStr,
+      }),
+    );
+  });
+  for (let i = dates.length; i < daySlots.length; i++) {
+    daySlots[i].hidden = true;
   }
 
   const redraw = () => {
@@ -628,27 +665,14 @@ const renderHourly = (weatherData, locationName) => {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
 };
 
-if (!navigator.geolocation) {
-  showWeatherError("Geolocation not supported");
-} else {
-  navigator.geolocation.getCurrentPosition(
-    async ({ coords: { latitude: lat, longitude: lon } }) => {
-      try {
-        const [weather, location] = await Promise.allSettled([
-          fetchJson(WEATHER_URL(lat, lon)),
-          fetchJson(LOCATION_URL(lat, lon)),
-        ]);
-        if (weather.status !== "fulfilled") throw weather.reason;
-        renderHourly(
-          weather.value,
-          location.status === "fulfilled" ? formatLocation(location.value) : undefined,
-        );
-      } catch {
-        showWeatherError("Unable to fetch weather");
-      }
-    },
-    () => {
-      showWeatherError("Location access denied");
-    },
-  );
-}
+getSharedPosition()
+  .then(({ lat, lon }) => fetchWeather(lat, lon))
+  .then(renderHourly)
+  .catch((e) => {
+    if (e.code === 1) showWeatherError("Location access denied");
+    else if (e.message === "Geolocation not supported") {
+      showWeatherError("Geolocation not supported");
+    } else {
+      showWeatherError("Unable to fetch weather");
+    }
+  });
