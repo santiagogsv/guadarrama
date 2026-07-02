@@ -1,7 +1,7 @@
 const PRECIP_LIGHT = 2.5;
 const PRECIP_MODERATE = 7.6;
-const CHART_H = 190;
-const PAD = { t: 8, r: 8, b: 24, l: 32 };
+const CHART_H = 160;
+const CHART_PAD = { t: 4, r: 6, b: 18, l: 28 };
 const WEATHER_URL = (lat, lon) =>
   `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=apparent_temperature,precipitation,uv_index,is_day&timezone=auto&past_days=1&forecast_days=8`;
 
@@ -174,15 +174,109 @@ const uvBgColor = (uv, isDay, colors) => {
   return bandColor(uv, colors.uvDay);
 };
 
+const TEMP_BANDS = {
+  light: [
+    [-8, "#0040ff"],
+    [-6, "#0066ff"],
+    [-4, "#007aff"],
+    [-2, "#0091ff"],
+    [0, "#00a8ff"],
+    [2, "#00b8d4"],
+    [4, "#00b4a0"],
+    [6, "#00b86b"],
+    [8, "#2dd36f"],
+    [10, "#4cd964"],
+    [12, "#7ed321"],
+    [14, "#9acd32"],
+    [16, "#c6e000"],
+    [18, "#e6e600"],
+    [20, "#ffe600"],
+    [22, "#ffd000"],
+    [24, "#ffb800"],
+    [26, "#ffa000"],
+    [28, "#ff8800"],
+    [30, "#ff6f00"],
+    [32, "#ff5500"],
+    [34, "#ff3300"],
+    [36, "#ff0055"],
+    [38, "#e600e6"],
+    [Infinity, "#b300ff"],
+  ],
+  dark: [
+    [-8, "#6eb6ff"],
+    [-6, "#82cfff"],
+    [-4, "#90d5ff"],
+    [-2, "#99e0ff"],
+    [0, "#4dd0e1"],
+    [2, "#26c6da"],
+    [4, "#1de9b6"],
+    [6, "#00e5a0"],
+    [8, "#69f0ae"],
+    [10, "#66bb6a"],
+    [12, "#9ccc65"],
+    [14, "#aed581"],
+    [16, "#c5e17a"],
+    [18, "#dce775"],
+    [20, "#fff176"],
+    [22, "#ffee58"],
+    [24, "#ffd54f"],
+    [26, "#ffca28"],
+    [28, "#ffb74d"],
+    [30, "#ffa726"],
+    [32, "#ff9800"],
+    [34, "#ff7043"],
+    [36, "#ff5252"],
+    [38, "#ff4081"],
+    [Infinity, "#ea80fc"],
+  ],
+};
+
 const tempLineColor = (temp, dark) => {
-  if (temp < 0) return dark ? "#6eb5ff" : "#4a9eff";
-  if (temp < 8) return dark ? "#5ac8fa" : "#32ade6";
-  if (temp < 15) return dark ? "#63d68a" : "#34c759";
-  if (temp < 20) return dark ? "#b8e986" : "#8bc34a";
-  if (temp < 25) return dark ? "#ffd60a" : "#ffcc00";
-  if (temp < 30) return dark ? "#ffb340" : "#ff9500";
-  if (temp < 35) return dark ? "#ff6961" : "#ff3b30";
-  return dark ? "#bf5af2" : "#af52de";
+  const bands = dark ? TEMP_BANDS.dark : TEMP_BANDS.light;
+  for (const [max, color] of bands) {
+    if (temp < max) return color;
+  }
+  return bands.at(-1)[1];
+};
+
+const TEMP_LINE_LAYERS = [
+  { blur: 18, alpha: 0.5, width: 14 },
+  { blur: 10, alpha: 0.68, width: 8.5 },
+  { blur: 4, alpha: 0.85, width: 5.5 },
+  { blur: 0, alpha: 1, width: 3.25 },
+];
+
+const tempChartPoints = (times, temps, xAt, yTemp) =>
+  times.map((t, i) => ({ x: xAt(t), y: yTemp(temps[i]), temp: temps[i] }));
+
+const tempStrokeGradient = (ctx, points, dark) => {
+  const grad = ctx.createLinearGradient(points[0].x, 0, points.at(-1).x, 0);
+  const span = points.at(-1).x - points[0].x || 1;
+  for (const point of points) {
+    grad.addColorStop((point.x - points[0].x) / span, tempLineColor(point.temp, dark));
+  }
+  return grad;
+};
+
+const traceSmoothPath = (ctx, points) => {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+    return;
+  }
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+  }
 };
 
 const clipPlot = (ctx, pad, plotW, plotH, fn) => {
@@ -213,26 +307,26 @@ const drawChart = (canvas, day, opts) => {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const plotW = width - PAD.l - PAD.r;
-  const plotH = chartH - PAD.t - PAD.b;
-  const temps = smooth(day.temps, 2);
+  const plotW = width - CHART_PAD.l - CHART_PAD.r;
+  const plotH = chartH - CHART_PAD.t - CHART_PAD.b;
+  const temps = smooth(day.temps, 3);
   const n = day.times.length;
   if (!n) return;
 
   const xMin = day.times[0];
   const xMax = day.times[n - 1];
   const xSpan = xMax - xMin || 1;
-  const xAt = (t) => PAD.l + ((t - xMin) / xSpan) * plotW;
-  const yTemp = (v) => PAD.t + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
+  const xAt = (t) => CHART_PAD.l + ((t - xMin) / xSpan) * plotW;
+  const yTemp = (v) => CHART_PAD.t + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
   const barW = Math.max(2, plotW / n - 1);
 
   ctx.clearRect(0, 0, width, chartH);
 
-  clipPlot(ctx, PAD, plotW, plotH, () => {
+  clipPlot(ctx, CHART_PAD, plotW, plotH, () => {
     ctx.filter = "blur(10px)";
     for (let i = 0; i < n; i++) {
-      const x0 = i === 0 ? PAD.l : (xAt(day.times[i - 1]) + xAt(day.times[i])) / 2;
-      const x1 = i < n - 1 ? (xAt(day.times[i]) + xAt(day.times[i + 1])) / 2 : PAD.l + plotW;
+      const x0 = i === 0 ? CHART_PAD.l : (xAt(day.times[i - 1]) + xAt(day.times[i])) / 2;
+      const x1 = i < n - 1 ? (xAt(day.times[i]) + xAt(day.times[i + 1])) / 2 : CHART_PAD.l + plotW;
       const c0 = uvBgColor(day.uv[i], day.isDay[i], colors);
       if (i < n - 1) {
         const grad = ctx.createLinearGradient(x0, 0, x1, 0);
@@ -242,7 +336,7 @@ const drawChart = (canvas, day, opts) => {
       } else {
         ctx.fillStyle = c0;
       }
-      ctx.fillRect(x0, PAD.t - 8, x1 - x0, plotH + 16);
+      ctx.fillRect(x0, CHART_PAD.t - 8, x1 - x0, plotH + 16);
     }
     ctx.filter = "none";
   });
@@ -254,8 +348,8 @@ const drawChart = (canvas, day, opts) => {
   for (let t = Math.ceil(tempMin / 5) * 5; t <= tempMax; t += 5) {
     const y = yTemp(t);
     ctx.beginPath();
-    ctx.moveTo(PAD.l, y);
-    ctx.lineTo(PAD.l + plotW, y);
+    ctx.moveTo(CHART_PAD.l, y);
+    ctx.lineTo(CHART_PAD.l + plotW, y);
     ctx.stroke();
     ctx.fillStyle = colors.text;
     ctx.fillText(`${t}°`, 2, y + 4);
@@ -265,19 +359,19 @@ const drawChart = (canvas, day, opts) => {
     for (let d = 1; d < weekDays.length; d++) {
       const x = xAt(day.times[weekDays[d].index]);
       ctx.beginPath();
-      ctx.moveTo(x, PAD.t);
-      ctx.lineTo(x, PAD.t + plotH);
+      ctx.moveTo(x, CHART_PAD.t);
+      ctx.lineTo(x, CHART_PAD.t + plotH);
       ctx.stroke();
     }
     ctx.textAlign = "center";
     for (let d = 0; d < weekDays.length; d++) {
       const { date, index } = weekDays[d];
       if (index >= n) continue;
-      const xStart = d === 0 ? PAD.l : xAt(day.times[index]);
+      const xStart = d === 0 ? CHART_PAD.l : xAt(day.times[index]);
       const xEnd =
         d < weekDays.length - 1
           ? xAt(day.times[weekDays[d + 1].index])
-          : PAD.l + plotW;
+          : CHART_PAD.l + plotW;
       const label = formatDayAxisLabel(date, todayStr);
       ctx.fillStyle = colors.text;
       ctx.fillText(label, (xStart + xEnd) / 2, chartH - 6);
@@ -296,29 +390,24 @@ const drawChart = (canvas, day, opts) => {
     if (p <= 0) continue;
     const h = (p / precipMax) * plotH * 0.45;
     ctx.fillStyle = bandColor(p, colors.precip);
-    ctx.fillRect(xAt(day.times[i]) - barW / 2, PAD.t + plotH - h, barW, h);
+    ctx.fillRect(xAt(day.times[i]) - barW / 2, CHART_PAD.t + plotH - h, barW, h);
   }
 
-  const strokeTemp = (glow) => {
-    clipPlot(ctx, PAD, plotW, plotH, () => {
-      ctx.filter = glow ? "blur(6px)" : "none";
-      ctx.globalAlpha = glow ? 0.75 : 1;
-      ctx.lineWidth = glow ? 8 : 5.5;
+  const tempPoints = tempChartPoints(day.times, temps, xAt, yTemp);
+  for (const { blur, alpha, width } of TEMP_LINE_LAYERS) {
+    clipPlot(ctx, CHART_PAD, plotW, plotH, () => {
+      ctx.filter = blur ? `blur(${blur}px)` : "none";
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = width;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      for (let i = 0; i < n - 1; i++) {
-        ctx.strokeStyle = tempLineColor((temps[i] + temps[i + 1]) / 2, colors.dark);
-        ctx.beginPath();
-        ctx.moveTo(xAt(day.times[i]), yTemp(temps[i]));
-        ctx.lineTo(xAt(day.times[i + 1]), yTemp(temps[i + 1]));
-        ctx.stroke();
-      }
+      traceSmoothPath(ctx, tempPoints);
+      ctx.strokeStyle = tempStrokeGradient(ctx, tempPoints, colors.dark);
+      ctx.stroke();
       ctx.filter = "none";
     });
-  };
-
-  strokeTemp(true);
-  strokeTemp(false);
+  }
+  ctx.globalAlpha = 1;
 
   if (opts.isToday || opts.showNow) {
     const now = Date.now() / 1000;
@@ -328,14 +417,14 @@ const drawChart = (canvas, day, opts) => {
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.moveTo(x, PAD.t);
-      ctx.lineTo(x, PAD.t + plotH);
+      ctx.moveTo(x, CHART_PAD.t);
+      ctx.lineTo(x, CHART_PAD.t + plotH);
       ctx.stroke();
       ctx.setLineDash([]);
     }
   }
 
-  canvas._meta = { day, temps, xAt, yTemp, pad: PAD, plotW, weekDays, todayStr };
+  canvas._meta = { day, temps, xAt, yTemp, pad: CHART_PAD, plotW, weekDays, todayStr };
 };
 
 const bindTooltip = (canvas, tooltip) => {
@@ -430,9 +519,13 @@ const mergeWeek = (grouped, dates) => {
 const createChartCard = (title, day, scales, chartOpts = {}) => {
   const card = document.createElement("div");
   card.className = chartOpts.weekDays ? "day-card day-card--week" : "day-card";
-  if (title) card.innerHTML = `<h4>${title}</h4>`;
+  if (title) {
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    card.append(heading);
+  }
   const wrap = document.createElement("div");
-  wrap.className = chartOpts.weekDays ? "day-chart day-chart--week" : "day-chart";
+  wrap.className = "day-chart";
   const canvas = document.createElement("canvas");
   const tooltip = document.createElement("div");
   tooltip.className = "chart-tooltip";
@@ -445,7 +538,7 @@ const createChartCard = (title, day, scales, chartOpts = {}) => {
 
 const showWeatherError = (message) => {
   const root = $hourly();
-  root.querySelectorAll("#weather-now, .chart-block").forEach((el) => el.remove());
+  root.querySelectorAll("#weather-now, #week-chart, #chart-grid").forEach((el) => el.remove());
   const status = $status();
   if (status) status.textContent = message;
   else root.innerHTML = `<p>${message}</p>`;
@@ -474,7 +567,7 @@ const renderHourly = (weatherData, locationName) => {
   if (curFeels != null && nowEl && feelsValue) {
     feelsValue.textContent = formatTemp(curFeels);
     if (locationName && locationEl) {
-      locationEl.textContent = ` · ${locationName}`;
+      locationEl.textContent = locationName;
       locationEl.hidden = false;
     }
     nowEl.hidden = false;
@@ -487,11 +580,10 @@ const renderHourly = (weatherData, locationName) => {
   const { week, weekDays } = mergeWeek(grouped, dates);
   const weekWrap = document.getElementById("week-chart");
   weekWrap.innerHTML = "";
-  const weekChart = createChartCard(null, week, scales, {
+  const weekChart = createChartCard("Full week", week, scales, {
     weekDays,
     todayStr,
     showNow: true,
-    chartH: 220,
   });
   weekWrap.append(weekChart.card);
   charts.push(weekChart);

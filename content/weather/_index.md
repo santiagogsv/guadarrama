@@ -1,4 +1,4 @@
 +++
-title = "Weather"
+title = "Home"
 template = "weather.html"
 +++

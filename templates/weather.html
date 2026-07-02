@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Weather · {{ config.title }}{% endblock title %}
+{% block title %}Home · {{ config.title }}{% endblock title %}
 {% block description %}<meta name="description" content="Hourly weather and nearby NYC subway arrivals." />{% endblock description %}
 
 {% block head %}
@@ -13,26 +13,23 @@
 <main class="page page--wide">
   <div id="hourly">
     <div class="weather-now" id="weather-now" hidden>
-      <span class="weather-now__temp" id="feels-value">--°</span>
-      <span class="weather-now__meta">feels like<span id="location-name" hidden></span></span>
-    </div>
-    <section class="chart-block">
-      <h3 class="heading chart-block__title">Week</h3>
-      <div id="week-chart">
-        <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
-          <div class="day-chart day-chart--week"></div>
-        </div>
+      <div class="weather-now__row">
+        <span class="weather-now__temp" id="feels-value">--°</span>
+        <span class="weather-now__location" id="location-name" hidden></span>
       </div>
-    </section>
-    <section class="chart-block">
-      <h3 class="heading chart-block__title">Day view</h3>
-      <div id="chart-grid" class="carousel carousel--chart chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
-    </section>
+      <span class="weather-now__meta">feels like</span>
+    </div>
+    <div id="week-chart">
+      <div class="day-card day-card--week chart-skeleton" aria-hidden="true">
+        <h4>Full week</h4>
+        <div class="day-chart"></div>
+      </div>
+    </div>
+    <div id="chart-grid" class="carousel carousel--chart chart-grid-skeleton" tabindex="0" aria-label="Daily hour-by-hour forecasts"></div>
     <div class="hourly-status" id="hourly-status" role="status">Loading weather…</div>
   </div>
 
-  <section class="mta-section" id="mta" aria-labelledby="mta-heading">
-    <h3 class="heading" id="mta-heading">Subway</h3>
+  <section class="mta-section" id="mta" aria-label="Subway">
     <div class="toolbar">
       <button class="btn btn--grow" onclick="refreshTrainTimes()" type="button">Refresh trains</button>
       <button class="btn btn--icon btn--ghost" onclick="refreshLocation()" type="button" aria-label="Update location">◎</button>

@@ -4,8 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}{% if page %}{{ page.title }}{% elif section %}{{ section.title }}{% endif %} · {{
-    config.title }}{% endblock title %}</title>
+  <title>{% block title %}{% if page %}{{ page.title }}{% elif section %}{{ section.title }}{% endif %} · {{ config.title }}{% endblock title %}</title>
   {% block description %}
   <meta name="description" content="{{ config.description }}" />{% endblock description %}
   <link rel="stylesheet" href="{{ get_url(path='site.css') | safe }}" />
@@ -16,7 +15,7 @@
   <header class="site-header">
     <nav class="nav" aria-label="Site">
       <a href="{{ get_url(path='/') | safe }}" {% if current_path=="/" or current_path is starting_with("/weather") %}
-        aria-current="page" {% endif %}>Weather</a>
+        aria-current="page" {% endif %}>Home</a>
       <a href="{{ get_url(path='markdown/') | safe }}" {% if current_path is starting_with("/markdown") %}
         aria-current="page" {% endif %}>Markdown</a>
     </nav>
