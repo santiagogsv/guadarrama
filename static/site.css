@@ -33,7 +33,7 @@
   --gap-sm: 0.5rem;
   --inset: 0.5rem;
   --radius: 0.5rem;
-  --chart-card: clamp(18rem, 84vw, 28rem);
+  --chart-card: clamp(20rem, 88vw, 24rem);
   --station-card: clamp(20rem, 88vw, 24rem);
   --chart-h: 160px;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -100,6 +100,23 @@ a {
   padding-inline: max(var(--pad), env(safe-area-inset-left, 0px)) max(var(--pad), env(safe-area-inset-right, 0px));
   border-block-end: 1px solid var(--border);
   background: var(--bg);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.site-header .geo-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.site-header .geo-btn:is(:hover, :focus-visible) {
+  color: var(--text);
 }
 
 .page {
@@ -313,8 +330,15 @@ a {
 .weather-now__row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--gap-sm);
+}
+
+.weather-now__location-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
 }
 
 .weather-now__temp {
@@ -333,6 +357,7 @@ a {
 
 .weather-now__meta {
   font-size: 0.8125rem;
+  line-height: 1.2;
   color: var(--muted);
 }
 
@@ -352,7 +377,7 @@ a {
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted) 40%, transparent) transparent;
-  touch-action: pan-x;
+  touch-action: pan-x pan-y;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -443,6 +468,7 @@ a {
 }
 
 @supports selector(::scroll-button(left)) {
+
   .carousel::scroll-button(left),
   .carousel::scroll-button(right) {
     position: sticky;
