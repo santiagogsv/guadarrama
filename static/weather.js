@@ -25,11 +25,11 @@ const fetchWeather = async (lat, lon) => {
       const { data, ts } = JSON.parse(raw);
       if (Date.now() - ts < WEATHER_CACHE_TTL_MS) return data;
     }
-  } catch {}
+  } catch { }
   const data = await fetchJson(WEATHER_URL(lat, lon));
   try {
     sessionStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
-  } catch {}
+  } catch { }
   return data;
 };
 
@@ -272,6 +272,24 @@ const tempStrokeGradient = (ctx, points, dark) => {
   return grad;
 };
 
+const findDayMinMaxTemps = (temps, startIdx, endIdx) => {
+  let minTemp = Infinity;
+  let minIdx = 0;
+  let maxTemp = -Infinity;
+  let maxIdx = 0;
+  for (let i = startIdx; i < endIdx; i++) {
+    if (temps[i] < minTemp) {
+      minTemp = temps[i];
+      minIdx = i;
+    }
+    if (temps[i] > maxTemp) {
+      maxTemp = temps[i];
+      maxIdx = i;
+    }
+  }
+  return { minTemp, minIdx, maxTemp, maxIdx };
+};
+
 const traceSmoothPath = (ctx, points) => {
   if (points.length < 2) return;
   ctx.beginPath();
@@ -456,6 +474,45 @@ const drawChart = (canvas, day, opts) => {
     }
   }
 
+  // Draw temperature labels (positioned relative to the temperature line)
+  ctx.font = "bold 12px system-ui, sans-serif";
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = "center";
+
+  if (weekDays) {
+    // For week view: show min/max for each day
+    for (let d = 0; d < weekDays.length; d++) {
+      const startIdx = weekDays[d].index;
+      const endIdx = d < weekDays.length - 1 ? weekDays[d + 1].index : n;
+      if (endIdx <= startIdx) continue;
+
+      const { minTemp, minIdx, maxTemp, maxIdx } = findDayMinMaxTemps(temps, startIdx, endIdx);
+
+      // Draw max temperature label above the max point on the line
+      const maxX = xAt(day.times[maxIdx]);
+      const maxY = yTemp(maxTemp);
+      ctx.fillText(formatTemp(maxTemp), maxX, maxY - 8);
+
+      // Draw min temperature label below the min point on the line
+      const minX = xAt(day.times[minIdx]);
+      const minY = yTemp(minTemp);
+      ctx.fillText(formatTemp(minTemp), minX, minY + 16);
+    }
+  } else {
+    // For day view: show overall min/max
+    const { minTemp, minIdx, maxTemp, maxIdx } = findDayMinMaxTemps(temps, 0, n);
+
+    // Draw max temperature label above the max point on the line
+    const maxX = xAt(day.times[maxIdx]);
+    const maxY = yTemp(maxTemp);
+    ctx.fillText(formatTemp(maxTemp), maxX, maxY - 8);
+
+    // Draw min temperature label below the min point on the line
+    const minX = xAt(day.times[minIdx]);
+    const minY = yTemp(minTemp);
+    ctx.fillText(formatTemp(minTemp), minX, minY + 16);
+  }
+
   canvas._meta = { day, temps, xAt, yTemp, pad: CHART_PAD, plotW, weekDays, todayStr };
 };
 
@@ -606,8 +663,7 @@ const renderHourly = (weatherData) => {
 
   const charts = [];
   const { week, weekDays } = mergeWeek(grouped, dates);
-  const weekWrap = document.getElementById("week-chart");
-  const weekCard = weekWrap?.querySelector('[data-chart="week"]');
+  const weekCard = document.querySelector('#chart-grid [data-chart="week"]');
   if (weekCard) {
     charts.push(
       mountChartInCard(weekCard, "Full week", week, scales, {
@@ -620,7 +676,12 @@ const renderHourly = (weatherData) => {
 
   const grid = document.getElementById("chart-grid");
   const daySlots = grid ? [...grid.querySelectorAll("[data-day-slot]")] : [];
-  const scrollToToday = () => {
+  const scrollToDefault = () => {
+    const weekCard = grid?.querySelector('.day-card.day-card--week:not([hidden]):not(.day-card--skeleton)');
+    if (weekCard) {
+      weekCard.scrollIntoView({ inline: "start", block: "nearest" });
+      return;
+    }
     const todayCard = grid?.querySelector(
       '.day-card:not(.day-card--week):not([hidden]):not(.day-card--skeleton)',
     );
@@ -651,7 +712,7 @@ const renderHourly = (weatherData) => {
 
   requestAnimationFrame(() => {
     redraw();
-    scrollToToday();
+    scrollToDefault();
   });
 
   let resizeRaf;

@@ -9,7 +9,6 @@ A minimal personal site built with [Zola](https://www.getzola.org/).
 | `/` | Home |
 | `/weather/` | Hourly feels-like weather near you |
 | `/mta/` | Real-time NYC subway arrivals |
-| `/markdown/` | Client-side markdown viewer |
 
 ## Quick start
 

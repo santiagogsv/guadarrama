@@ -35,9 +35,9 @@
   --radius: 0.5rem;
   --chart-card: clamp(20rem, 88vw, 24rem);
   --station-card: clamp(20rem, 88vw, 24rem);
-  --chart-h: 160px;
+  --chart-h: 180px;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Menlo", "Monaco", monospace;
+  --font-mono: var(--font);
 
   font-family: var(--font);
   line-height: 1.5;
@@ -264,10 +264,6 @@ a {
   text-align: center;
 }
 
-#week-chart {
-  width: 100%;
-  min-width: 0;
-}
 
 .chart-placeholder {
   width: 100%;
@@ -427,10 +423,7 @@ a {
   text-overflow: ellipsis;
 }
 
-.day-card--week {
-  width: 100%;
-  max-width: 100%;
-}
+/* week card now lives in the chart carousel */
 
 .day-chart {
   position: relative;
@@ -641,7 +634,7 @@ a {
 }
 
 .time-text {
-  font-family: var(--font-mono);
+  font-family: var(--font);
   font-size: 0.9375rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -653,7 +646,7 @@ a {
   border: 1px solid var(--border);
   border-radius: 0.25rem;
   background: var(--surface);
-  font-family: var(--font-mono);
+  font-family: var(--font);
   font-size: 0.5625rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -737,7 +730,7 @@ a {
 }
 
 .modal-subtitle {
-  font-family: var(--font-mono);
+  font-family: var(--font);
   font-size: 0.8125rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -792,7 +785,7 @@ a {
 
 .arrival-time {
   margin-inline-start: auto;
-  font-family: var(--font-mono);
+  font-family: var(--font);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
@@ -884,7 +877,7 @@ a {
 }
 
 #output code {
-  font-family: ui-monospace, "SF Mono", monospace;
+  font-family: var(--font);
   font-size: 0.9em;
 }
 

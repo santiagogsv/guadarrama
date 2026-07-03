@@ -20,19 +20,17 @@
         <span class="weather-now__temp" id="feels-value">--°</span>
         <div class="weather-now__location-stack">
           <span class="weather-now__location" id="location-name">—</span>
-          <span class="weather-now__meta">feels like - Rain - UV</span>
+          <span class="weather-now__meta">Feels Like - Rain - UV</span>
         </div>
       </div>
     </div>
-    <div id="week-chart">
+    <div id="chart-grid" class="carousel carousel--chart" tabindex="0" aria-label="Daily hour-by-hour forecasts">
       <div class="day-card day-card--week day-card--skeleton" data-chart="week" aria-hidden="true">
         <h4>Full week</h4>
         <div class="day-chart">
           <div class="chart-placeholder" aria-hidden="true"></div>
         </div>
       </div>
-    </div>
-    <div id="chart-grid" class="carousel carousel--chart" tabindex="0" aria-label="Daily hour-by-hour forecasts">
       {% for i in range(end=8) %}
       <div class="day-card day-card--skeleton" data-day-slot="{{ i }}" aria-hidden="true">
         <h4 class="day-card__title">&nbsp;</h4>
